@@ -8,6 +8,7 @@ import {
   seedDatabaseIfEmpty,
   getSchoolName,
   saveSchoolName,
+  getEffectiveUidAndEmail,
   subscribeToGrades,
   subscribeToClasses,
   subscribeToTeachers,
@@ -675,22 +676,19 @@ export default function App() {
   };
 
   const handleSchoolNameChange = async (newName: string) => {
-    // 1. Optimistic Update (Instant feedback on the UI and cache)
+    // 1. Optimistic Update (Instant 0ms feedback on the UI and cache)
     setSchoolName(newName);
-    const user = auth.currentUser;
-    if (user && user.email) {
-      localStorage.setItem(`school_name_${user.email.toLowerCase()}`, newName);
+    const eff = getEffectiveUidAndEmail();
+    if (eff.uid) {
+      localStorage.setItem(`school_name_${eff.uid}`, newName);
     }
+    if (eff.email) {
+      localStorage.setItem(`school_name_${eff.email.toLowerCase()}`, newName);
+    }
+    localStorage.setItem("school_name_cache", newName);
     
-    // 2. Trigger background save state
-    setIsSavingSchoolName(true);
-    try {
-      await saveSchoolName(newName);
-    } catch (err) {
-      console.error("Error saving school name:", err);
-    } finally {
-      setIsSavingSchoolName(false);
-    }
+    // 2. Background async save (0ms perceived latency)
+    saveSchoolName(newName).catch(err => console.error("Error saving school name:", err));
   };
 
   // Synchronize app mode with URL routing

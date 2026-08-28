@@ -676,6 +676,18 @@ if (typeof window !== "undefined") {
   } catch (_) {}
 }
 
+// Execute Firestore write safely with instant non-blocking return (0-200ms)
+async function safeFirestoreWrite(promise: Promise<any>, timeoutMs: number = 200): Promise<void> {
+  try {
+    await Promise.race([
+      promise,
+      new Promise(resolve => setTimeout(resolve, timeoutMs))
+    ]);
+  } catch (err: any) {
+    handleFirestoreError(err);
+  }
+}
+
 export function isQuotaExhausted(): boolean {
   return false;
 }
@@ -956,27 +968,15 @@ export async function saveAttendanceRecord(record: Omit<AttendanceRecord, "id" |
   saveOrUpdateLocalItem(ATTENDANCE_COLL, fullRecord, uid);
 
   // 2. Persist to Firestore (safeguarded non-blocking timeout)
-  try {
-    const docRef = doc(db, ATTENDANCE_COLL, recordId);
-    const writePromise = setDoc(docRef, fullRecord, { merge: true });
-    await Promise.race([
-      writePromise,
-      new Promise(resolve => setTimeout(resolve, 800))
-    ]);
-  } catch (err: any) {
-    handleFirestoreError(err);
-  }
+  const docRef = doc(db, ATTENDANCE_COLL, recordId);
+  await safeFirestoreWrite(setDoc(docRef, fullRecord, { merge: true }), 200);
 }
 
 // Delete entire Attendance Record (Instant local update + real-time Firestore delete)
 export async function deleteAttendanceRecord(id: string): Promise<void> {
   const eff = getEffectiveUidAndEmail();
   removeLocalItem(ATTENDANCE_COLL, id, eff.uid);
-  try {
-    await deleteDoc(doc(db, ATTENDANCE_COLL, id));
-  } catch (err: any) {
-    handleFirestoreError(err);
-  }
+  await safeFirestoreWrite(deleteDoc(doc(db, ATTENDANCE_COLL, id)), 200);
 }
 
 // Delete single student absence/late entry from an Attendance Record (Instant 0ms update + Firestore sync)
@@ -1028,13 +1028,9 @@ export async function deleteAttendanceEntry(recordId: string, studentId: string,
   }
 
   // 2. Persist to Firestore
-  try {
+  if (updatedRecord) {
     const docRef = doc(db, ATTENDANCE_COLL, recordId);
-    if (updatedRecord) {
-      await setDoc(docRef, updatedRecord, { merge: true });
-    }
-  } catch (err: any) {
-    handleFirestoreError(err);
+    await safeFirestoreWrite(setDoc(docRef, updatedRecord, { merge: true }), 200);
   }
 }
 
@@ -1108,12 +1104,8 @@ export async function saveBehaviorRecord(record: Omit<BehaviorRecord, "id" | "ti
   saveOrUpdateLocalItem(BEHAVIORS_COLL, fullRecord, uid);
 
   // 2. Firestore write
-  try {
-    const docRef = doc(db, BEHAVIORS_COLL, newId);
-    await setDoc(docRef, fullRecord, { merge: true });
-  } catch (err: any) {
-    handleFirestoreError(err);
-  }
+  const docRef = doc(db, BEHAVIORS_COLL, newId);
+  await safeFirestoreWrite(setDoc(docRef, fullRecord, { merge: true }), 200);
 
   return newId;
 }
@@ -1122,11 +1114,7 @@ export async function saveBehaviorRecord(record: Omit<BehaviorRecord, "id" | "ti
 export async function deleteBehaviorRecord(id: string): Promise<void> {
   const eff = getEffectiveUidAndEmail();
   removeLocalItem(BEHAVIORS_COLL, id, eff.uid);
-  try {
-    await deleteDoc(doc(db, BEHAVIORS_COLL, id));
-  } catch (err: any) {
-    handleFirestoreError(err);
-  }
+  await safeFirestoreWrite(deleteDoc(doc(db, BEHAVIORS_COLL, id)), 200);
 }
 
 // --- MORNING DELAY (التأخر الصباحي) ---
@@ -1210,16 +1198,8 @@ export async function saveMorningDelayRecord(record: Omit<MorningDelayRecord, "i
   saveOrUpdateLocalItem(MORNING_DELAYS_COLL, fullRecord, uid);
 
   // 2. Real-time Firestore write (safeguarded non-blocking timeout)
-  try {
-    const docRef = doc(db, MORNING_DELAYS_COLL, recordId);
-    const writePromise = setDoc(docRef, fullRecord, { merge: true });
-    await Promise.race([
-      writePromise,
-      new Promise(resolve => setTimeout(resolve, 800))
-    ]);
-  } catch (err: any) {
-    handleFirestoreError(err);
-  }
+  const docRef = doc(db, MORNING_DELAYS_COLL, recordId);
+  await safeFirestoreWrite(setDoc(docRef, fullRecord, { merge: true }), 200);
 
   return recordId;
 }
@@ -1270,28 +1250,20 @@ export async function saveMorningDelaysBatch(records: Omit<MorningDelayRecord, "
     }, uid);
   });
 
-  try {
-    const batch = writeBatch(db);
-    for (const record of records) {
-      const recordId = `delay_${record.date}_${record.studentId}`;
-      const docRef = doc(db, MORNING_DELAYS_COLL, recordId);
-      batch.set(docRef, {
-        ...record,
-        id: recordId,
-        userId: uid,
-        userEmail: email,
-        timestamp: Date.now(),
-        updatedAt: Date.now()
-      }, { merge: true });
-    }
-    const writePromise = batch.commit();
-    await Promise.race([
-      writePromise,
-      new Promise(resolve => setTimeout(resolve, 1000))
-    ]);
-  } catch (err: any) {
-    handleFirestoreError(err);
+  const batch = writeBatch(db);
+  for (const record of records) {
+    const recordId = `delay_${record.date}_${record.studentId}`;
+    const docRef = doc(db, MORNING_DELAYS_COLL, recordId);
+    batch.set(docRef, {
+      ...record,
+      id: recordId,
+      userId: uid,
+      userEmail: email,
+      timestamp: Date.now(),
+      updatedAt: Date.now()
+    }, { merge: true });
   }
+  await safeFirestoreWrite(batch.commit(), 300);
 }
 
 // Delete Morning Delay Record (Instant local purge + real-time Firestore multi-doc delete)
@@ -1422,11 +1394,8 @@ export async function addGrade(name: string): Promise<string> {
   saveOrUpdateLocalItem(GRADES_COLL, newGradeObj);
 
   // 2. Persist to Firestore with explicit document ID
-  try {
-    await setDoc(doc(db, GRADES_COLL, generatedId), newGradeObj);
-  } catch (err: any) {
-    handleFirestoreError(err);
-  }
+  const docRef = doc(db, GRADES_COLL, generatedId);
+  await safeFirestoreWrite(setDoc(docRef, newGradeObj), 200);
 
   return generatedId;
 }
@@ -1469,26 +1438,22 @@ export async function addGradesBatch(names: string[]): Promise<{ id: string; nam
   });
 
   if (toCreate.length > 0) {
-    try {
-      const chunkSize = 400;
-      for (let i = 0; i < toCreate.length; i += chunkSize) {
-        const chunk = toCreate.slice(i, i + chunkSize);
-        const batch = writeBatch(db);
-        const now = Date.now();
-        chunk.forEach((item, idx) => {
-          const docRef = doc(db, GRADES_COLL, item.id);
-          batch.set(docRef, {
-            id: item.id,
-            name: item.name,
-            userId: uid,
-            userEmail: email,
-            createdAt: now + i + idx
-          });
+    const chunkSize = 400;
+    for (let i = 0; i < toCreate.length; i += chunkSize) {
+      const chunk = toCreate.slice(i, i + chunkSize);
+      const batch = writeBatch(db);
+      const now = Date.now();
+      chunk.forEach((item, idx) => {
+        const docRef = doc(db, GRADES_COLL, item.id);
+        batch.set(docRef, {
+          id: item.id,
+          name: item.name,
+          userId: uid,
+          userEmail: email,
+          createdAt: now + i + idx
         });
-        await batch.commit();
-      }
-    } catch (err: any) {
-      handleFirestoreError(err);
+      });
+      await safeFirestoreWrite(batch.commit(), 300);
     }
   }
 
@@ -1513,15 +1478,11 @@ export async function deleteGrade(id: string): Promise<void> {
   removeLocalItemsBy(STUDENTS_COLL, (s) => s.gradeId === id || classIdsToDelete.includes(s.classId), uid);
 
   // 3. Delete from Firestore in real time
-  try {
-    const batch = writeBatch(db);
-    batch.delete(doc(db, GRADES_COLL, id));
-    classIdsToDelete.forEach(cId => batch.delete(doc(db, CLASSES_COLL, cId)));
-    studentIdsToDelete.forEach(sId => batch.delete(doc(db, STUDENTS_COLL, sId)));
-    await batch.commit();
-  } catch (err: any) {
-    handleFirestoreError(err);
-  }
+  const batch = writeBatch(db);
+  batch.delete(doc(db, GRADES_COLL, id));
+  classIdsToDelete.forEach(cId => batch.delete(doc(db, CLASSES_COLL, cId)));
+  studentIdsToDelete.forEach(sId => batch.delete(doc(db, STUDENTS_COLL, sId)));
+  await safeFirestoreWrite(batch.commit(), 300);
 }
 
 // Add Class (Instant optimistic return + real-time Firestore persistence)
@@ -1550,11 +1511,8 @@ export async function addClass(name: string, gradeId: string): Promise<string> {
   saveOrUpdateLocalItem(CLASSES_COLL, newClassObj);
 
   // Firestore write with deterministic document ID
-  try {
-    await setDoc(doc(db, CLASSES_COLL, generatedId), newClassObj);
-  } catch (err: any) {
-    handleFirestoreError(err);
-  }
+  const docRef = doc(db, CLASSES_COLL, generatedId);
+  await safeFirestoreWrite(setDoc(docRef, newClassObj), 200);
 
   return generatedId;
 }
@@ -1601,27 +1559,23 @@ export async function addClassesBatch(classesList: { name: string; gradeId: stri
   });
 
   if (toCreate.length > 0) {
-    try {
-      const chunkSize = 400;
-      for (let i = 0; i < toCreate.length; i += chunkSize) {
-        const chunk = toCreate.slice(i, i + chunkSize);
-        const batch = writeBatch(db);
-        const now = Date.now();
-        chunk.forEach((c, idx) => {
-          const docRef = doc(db, CLASSES_COLL, c.id);
-          batch.set(docRef, {
-            id: c.id,
-            name: c.name,
-            gradeId: c.gradeId,
-            userId: uid,
-            userEmail: email,
-            createdAt: now + i + idx
-          });
+    const chunkSize = 400;
+    for (let i = 0; i < toCreate.length; i += chunkSize) {
+      const chunk = toCreate.slice(i, i + chunkSize);
+      const batch = writeBatch(db);
+      const now = Date.now();
+      chunk.forEach((c, idx) => {
+        const docRef = doc(db, CLASSES_COLL, c.id);
+        batch.set(docRef, {
+          id: c.id,
+          name: c.name,
+          gradeId: c.gradeId,
+          userId: uid,
+          userEmail: email,
+          createdAt: now + i + idx
         });
-        await batch.commit();
-      }
-    } catch (err: any) {
-      handleFirestoreError(err);
+      });
+      await safeFirestoreWrite(batch.commit(), 300);
     }
   }
 
@@ -1642,14 +1596,10 @@ export async function deleteClass(id: string): Promise<void> {
   removeLocalItemsBy(STUDENTS_COLL, (s) => s.classId === id, uid);
 
   // 3. Asynchronous Firestore batch delete
-  try {
-    const batch = writeBatch(db);
-    batch.delete(doc(db, CLASSES_COLL, id));
-    studentIdsToDelete.forEach(sId => batch.delete(doc(db, STUDENTS_COLL, sId)));
-    await batch.commit();
-  } catch (err: any) {
-    handleFirestoreError(err);
-  }
+  const batch = writeBatch(db);
+  batch.delete(doc(db, CLASSES_COLL, id));
+  studentIdsToDelete.forEach(sId => batch.delete(doc(db, STUDENTS_COLL, sId)));
+  await safeFirestoreWrite(batch.commit(), 300);
 }
 
 // Restore default classes (e.g. الفصل 1 إلى الفصل 6) for a specific grade or first grade
@@ -1714,11 +1664,8 @@ export async function addTeacher(name: string): Promise<string> {
 
   saveOrUpdateLocalItem(TEACHERS_COLL, newTeacherObj);
 
-  try {
-    await setDoc(doc(db, TEACHERS_COLL, generatedId), newTeacherObj);
-  } catch (err: any) {
-    handleFirestoreError(err);
-  }
+  const docRef = doc(db, TEACHERS_COLL, generatedId);
+  await safeFirestoreWrite(setDoc(docRef, newTeacherObj), 200);
 
   return generatedId;
 }
@@ -1744,26 +1691,22 @@ export async function addTeachersBatch(names: string[]): Promise<Teacher[]> {
   });
 
   if (toCreate.length > 0) {
-    try {
-      const chunkSize = 400;
-      for (let i = 0; i < toCreate.length; i += chunkSize) {
-        const chunk = toCreate.slice(i, i + chunkSize);
-        const batch = writeBatch(db);
-        const now = Date.now();
-        chunk.forEach((t, idx) => {
-          const docRef = doc(db, TEACHERS_COLL, t.id);
-          batch.set(docRef, { 
-            id: t.id,
-            name: t.name, 
-            userId: uid,
-            userEmail: email,
-            createdAt: now + i + idx
-          });
+    const chunkSize = 400;
+    for (let i = 0; i < toCreate.length; i += chunkSize) {
+      const chunk = toCreate.slice(i, i + chunkSize);
+      const batch = writeBatch(db);
+      const now = Date.now();
+      chunk.forEach((t, idx) => {
+        const docRef = doc(db, TEACHERS_COLL, t.id);
+        batch.set(docRef, { 
+          id: t.id,
+          name: t.name, 
+          userId: uid,
+          userEmail: email,
+          createdAt: now + i + idx
         });
-        await batch.commit();
-      }
-    } catch (err: any) {
-      handleFirestoreError(err);
+      });
+      await safeFirestoreWrite(batch.commit(), 300);
     }
   }
 
@@ -1774,26 +1717,18 @@ export async function addTeachersBatch(names: string[]): Promise<Teacher[]> {
 export async function deleteTeacher(id: string): Promise<void> {
   const eff = getEffectiveUidAndEmail();
   removeLocalItem(TEACHERS_COLL, id, eff.uid);
-  try {
-    await deleteDoc(doc(db, TEACHERS_COLL, id));
-  } catch (err: any) {
-    handleFirestoreError(err);
-  }
+  await safeFirestoreWrite(deleteDoc(doc(db, TEACHERS_COLL, id)), 200);
 }
 
 // Delete Multiple Teachers in a Batch (Instant 0ms local purge + real-time Firestore delete)
 export async function deleteTeachersBatch(ids: string[]): Promise<void> {
   const eff = getEffectiveUidAndEmail();
   ids.forEach(id => removeLocalItem(TEACHERS_COLL, id, eff.uid));
-  try {
-    const batch = writeBatch(db);
-    ids.forEach(id => {
-      batch.delete(doc(db, TEACHERS_COLL, id));
-    });
-    await batch.commit();
-  } catch (err: any) {
-    handleFirestoreError(err);
-  }
+  const batch = writeBatch(db);
+  ids.forEach(id => {
+    batch.delete(doc(db, TEACHERS_COLL, id));
+  });
+  await safeFirestoreWrite(batch.commit(), 300);
 }
 
 // Add Student (Deduplicates automatically by classId and normalized student name)
@@ -1844,11 +1779,8 @@ export async function addStudent(name: string, gradeId: string, classId: string)
 
   saveOrUpdateLocalItem(STUDENTS_COLL, newStudentObj);
 
-  try {
-    await setDoc(doc(db, STUDENTS_COLL, generatedId), newStudentObj);
-  } catch (err: any) {
-    handleFirestoreError(err);
-  }
+  const docRef = doc(db, STUDENTS_COLL, generatedId);
+  await safeFirestoreWrite(setDoc(docRef, newStudentObj), 200);
 
   return generatedId;
 }
@@ -1909,28 +1841,24 @@ export async function addStudentsBatch(studentsList: { name: string, gradeId: st
   });
 
   if (toCreate.length > 0) {
-    try {
-      const chunkSize = 400;
-      for (let i = 0; i < toCreate.length; i += chunkSize) {
-        const chunk = toCreate.slice(i, i + chunkSize);
-        const batch = writeBatch(db);
-        const now = Date.now();
-        chunk.forEach((s, idx) => {
-          const docRef = doc(db, STUDENTS_COLL, s.id);
-          batch.set(docRef, { 
-            id: s.id,
-            name: s.name, 
-            gradeId: s.gradeId, 
-            classId: s.classId, 
-            userId: uid,
-            userEmail: email,
-            createdAt: now + i + idx
-          });
+    const chunkSize = 400;
+    for (let i = 0; i < toCreate.length; i += chunkSize) {
+      const chunk = toCreate.slice(i, i + chunkSize);
+      const batch = writeBatch(db);
+      const now = Date.now();
+      chunk.forEach((s, idx) => {
+        const docRef = doc(db, STUDENTS_COLL, s.id);
+        batch.set(docRef, { 
+          id: s.id,
+          name: s.name, 
+          gradeId: s.gradeId, 
+          classId: s.classId, 
+          userId: uid,
+          userEmail: email,
+          createdAt: now + i + idx
         });
-        await batch.commit();
-      }
-    } catch (err: any) {
-      handleFirestoreError(err);
+      });
+      await safeFirestoreWrite(batch.commit(), 300);
     }
   }
 
@@ -1941,26 +1869,18 @@ export async function addStudentsBatch(studentsList: { name: string, gradeId: st
 export async function deleteStudent(id: string): Promise<void> {
   const eff = getEffectiveUidAndEmail();
   removeLocalItem(STUDENTS_COLL, id, eff.uid);
-  try {
-    await deleteDoc(doc(db, STUDENTS_COLL, id));
-  } catch (err: any) {
-    handleFirestoreError(err);
-  }
+  await safeFirestoreWrite(deleteDoc(doc(db, STUDENTS_COLL, id)), 200);
 }
 
 // Delete Multiple Students in a Batch (Instant 0ms local purge + real-time Firestore delete)
 export async function deleteStudentsBatch(ids: string[]): Promise<void> {
   const eff = getEffectiveUidAndEmail();
   ids.forEach(id => removeLocalItem(STUDENTS_COLL, id, eff.uid));
-  try {
-    const batch = writeBatch(db);
-    ids.forEach(id => {
-      batch.delete(doc(db, STUDENTS_COLL, id));
-    });
-    await batch.commit();
-  } catch (err: any) {
-    handleFirestoreError(err);
-  }
+  const batch = writeBatch(db);
+  ids.forEach(id => {
+    batch.delete(doc(db, STUDENTS_COLL, id));
+  });
+  await safeFirestoreWrite(batch.commit(), 300);
 }
 
 // Fetch all attendance for statistics
@@ -2039,10 +1959,8 @@ export async function saveSchoolName(schoolName: string): Promise<void> {
     localStorage.setItem(`school_name_${uid}`, schoolName);
   }
 
-  try {
-    const docRef = doc(db, SETTINGS_COLL, `settings_${uid}`);
-    await setDoc(docRef, { schoolName, userId: uid, userEmail: email, updatedAt: Date.now() }, { merge: true });
-  } catch (err) {}
+  const docRef = doc(db, SETTINGS_COLL, `settings_${uid}`);
+  await safeFirestoreWrite(setDoc(docRef, { schoolName, userId: uid, userEmail: email, updatedAt: Date.now() }, { merge: true }), 200);
 }
 
 // Generic live subscription helper using collection multiplexing hub
