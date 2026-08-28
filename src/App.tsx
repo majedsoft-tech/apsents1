@@ -81,7 +81,7 @@ function getInitialMode(): "teacher" | "admin" | "stats-only" | "super-admin" | 
   if (page === "morning-delay") return "morning-delay";
   if (page === "stats-only" || page === "stats") return "stats-only";
   if (page === "teacher") return "teacher";
-  if (page === "admin") return "admin";
+  if (page === "admin" || page === "index") return "admin";
 
   const path = window.location.pathname.toLowerCase();
   const hash = window.location.hash.toLowerCase();
@@ -98,7 +98,7 @@ function getInitialMode(): "teacher" | "admin" | "stats-only" | "super-admin" | 
   if (path.includes("/teacher") || hash.includes("#/teacher")) {
     return "teacher";
   }
-  if (path.includes("/admin") || hash.includes("#/admin")) {
+  if (path.includes("/admin") || hash.includes("#/admin") || path.includes("/index") || hash.includes("#/index")) {
     return "admin";
   }
 
@@ -496,7 +496,7 @@ export default function App() {
     if (ownerEmail && !ownerEmail.endsWith("@school.com")) query += `&email=${encodeURIComponent(ownerEmail)}`;
     if (schoolName) query += `&school=${encodeURIComponent(schoolName)}`;
 
-    const targetPath = pageValue === "admin" ? "/admin" 
+    const targetPath = pageValue === "admin" ? "/" 
       : pageValue === "super-admin" ? "/super-admin" 
       : pageValue === "morning-delay" ? "/morning-delay" 
       : pageValue === "teacher" ? "/teacher" 
@@ -612,7 +612,7 @@ export default function App() {
       setAppMode("admin");
       setAdminTab("stats");
       localStorage.removeItem("last_admin_tab");
-      window.history.replaceState({ mode: "admin" }, "", "/admin?page=admin&tab=stats#/admin");
+      window.history.replaceState({ mode: "admin" }, "", "/?page=admin&tab=stats#/index");
       setIsSyncModalOpen(false);
     } catch (err: any) {
       console.error("Google Sign-In Error:", err);
@@ -752,11 +752,11 @@ export default function App() {
     const expectedTab = appMode === "teacher" ? teacherTab : adminTab;
 
     if (currentPage !== expectedPage || (appMode !== "morning-delay" && currentTab !== expectedTab)) {
-      const newPath = appMode === "admin" ? "/admin" : appMode === "super-admin" ? "/super-admin" : appMode === "morning-delay" ? "/morning-delay" : appMode === "stats-only" ? "/" : "/";
+      const newPath = appMode === "admin" ? "/" : appMode === "super-admin" ? "/super-admin" : appMode === "morning-delay" ? "/morning-delay" : appMode === "stats-only" ? "/stats" : "/";
       const ownerPart = currentOwner ? `&owner=${currentOwner}` : "";
       const tabPart = appMode === "morning-delay" ? "" : `&tab=${expectedTab}`;
       const newSearch = `?page=${expectedPage}${tabPart}${ownerPart}`;
-      const newHash = appMode === "admin" ? "#/admin" : appMode === "super-admin" ? "#/super-admin" : appMode === "morning-delay" ? "#/morning-delay" : appMode === "stats-only" ? "#/stats-only" : "#/";
+      const newHash = appMode === "admin" ? "#/index" : appMode === "super-admin" ? "#/super-admin" : appMode === "morning-delay" ? "#/morning-delay" : appMode === "stats-only" ? "#/stats" : "#/";
       
       window.history.replaceState({ mode: appMode }, "", `${newPath}${newSearch}${newHash}`);
     }
@@ -1441,7 +1441,7 @@ export default function App() {
                   setTodayCounts({ absentCount: 0, behaviorCount: 0 });
                   setAppMode("admin");
                   setAdminTab("stats");
-                  window.history.replaceState({ mode: "admin" }, "", "/admin?page=admin&tab=stats#/admin");
+                  window.history.replaceState({ mode: "admin" }, "", "/?page=admin&tab=stats#/index");
                 }}
                 className="w-full flex items-center justify-start gap-2.5 px-3 py-2 bg-rose-50 hover:bg-rose-100/80 border border-rose-200 text-rose-600 hover:text-rose-700 rounded-xl transition-all duration-200 cursor-pointer"
               >
