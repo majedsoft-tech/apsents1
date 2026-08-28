@@ -445,13 +445,18 @@ export default function App() {
   }, [currentUser]);
 
   const handleRefreshData = async () => {
+    setIsRefreshingData(true);
     try {
+      // 1. Sync any pending offline records to Firestore
+      await syncAllLocalDataToFirestore().catch(() => {});
+
+      // 2. Force fetch authoritative state directly from Firestore
       const [g, c, t, s, sn] = await Promise.all([
-        getGrades(),
-        getClasses(),
-        getTeachers(),
-        getStudents(),
-        getSchoolName()
+        getGrades(true),
+        getClasses(true),
+        getTeachers(true),
+        getStudents(true),
+        getSchoolName(true)
       ]);
       if (sn) setSchoolName(sn);
       const sortedGrades = deduplicateById([...g]).sort((a, b) => {
@@ -476,6 +481,8 @@ export default function App() {
       setStudents(deduplicateById(s));
     } catch (err) {
       console.error("Error refreshing data:", err);
+    } finally {
+      setTimeout(() => setIsRefreshingData(false), 500);
     }
   };
 

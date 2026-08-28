@@ -162,13 +162,27 @@ function getLocalStorageKey(colName: string, uid?: string): string {
 function getLocalItems(colName: string, uid?: string): any[] {
   const eff = getEffectiveUidAndEmail();
   const currentUid = uid || eff.uid || "";
-  if (!currentUid && !eff.email) return [];
+  const currentEmail = eff.email?.toLowerCase() || "";
   if (typeof window === "undefined") return [];
   try {
-    const raw = localStorage.getItem(`school_offline_cache_${currentUid}_${colName}`);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed;
+    if (currentUid) {
+      const rawUser = localStorage.getItem(`school_offline_cache_${currentUid}_${colName}`);
+      if (rawUser) {
+        const parsed = JSON.parse(rawUser);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    }
+    if (currentEmail) {
+      const rawEmail = localStorage.getItem(`school_offline_cache_${currentEmail}_${colName}`);
+      if (rawEmail) {
+        const parsed = JSON.parse(rawEmail);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    }
+    const rawGeneric = localStorage.getItem(`school_offline_cache_${colName}`);
+    if (rawGeneric) {
+      const parsed = JSON.parse(rawGeneric);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
     }
     return [];
   } catch (e) {
@@ -769,7 +783,7 @@ export async function updateAttendanceAbsenceExcuse(recordId: string, studentId:
 }
 
 // Helper to fetch entire collection and filter client-side based on strict multi-tenant user isolation
-async function fetchAndFilterCollection(colName: string): Promise<any[]> {
+async function fetchAndFilterCollection(colName: string, force: boolean = false): Promise<any[]> {
   const eff = getEffectiveUidAndEmail();
   const currentUid = eff.uid;
   const currentEmail = eff.email;
@@ -778,14 +792,14 @@ async function fetchAndFilterCollection(colName: string): Promise<any[]> {
     return [];
   }
 
-  // 1. Check in-memory collection hub first
+  // 1. Check in-memory collection hub first (unless forced refresh)
   const hub = collectionHubs.get(colName);
-  if (hub && Array.isArray(hub.latestData) && hub.latestData.length > 0 && Date.now() - hub.lastUpdated < 60000) {
+  if (!force && hub && Array.isArray(hub.latestData) && hub.latestData.length > 0 && Date.now() - hub.lastUpdated < 60000) {
     const safeHubList = hub.latestData.filter(item => isDocBelongingToUser(item, currentUid, currentEmail));
     return safeHubList;
   }
 
-  // 2. Load from local storage cache
+  // 2. Load from local storage cache as immediate fallback
   const rawLocal = getLocalItems(colName, currentUid);
   const localList = Array.isArray(rawLocal) ? rawLocal.filter(item => isDocBelongingToUser(item, currentUid, currentEmail)) : [];
 
@@ -814,17 +828,14 @@ async function fetchAndFilterCollection(colName: string): Promise<any[]> {
 
     return results;
   } catch (err: any) {
-    if (err?.code === "resource-exhausted" || (typeof err?.message === "string" && err.message.toLowerCase().includes("quota"))) {
-      markQuotaExhausted();
-    }
-    // Graceful fallback to local cache on permission denial, quota limit, or offline
+    handleFirestoreError(err);
     return localList;
   }
 }
 
 // Fetch All Grades
-export async function getGrades(): Promise<Grade[]> {
-  const rawGrades = (await fetchAndFilterCollection(GRADES_COLL)) as Grade[];
+export async function getGrades(force: boolean = false): Promise<Grade[]> {
+  const rawGrades = (await fetchAndFilterCollection(GRADES_COLL, force)) as Grade[];
   const safeGrades = Array.isArray(rawGrades) ? rawGrades : [];
   const seen = new Set<string>();
   const uniqueGrades: Grade[] = [];
@@ -840,8 +851,8 @@ export async function getGrades(): Promise<Grade[]> {
 }
 
 // Fetch All Classes
-export async function getClasses(): Promise<Class[]> {
-  const rawClasses = (await fetchAndFilterCollection(CLASSES_COLL)) as Class[];
+export async function getClasses(force: boolean = false): Promise<Class[]> {
+  const rawClasses = (await fetchAndFilterCollection(CLASSES_COLL, force)) as Class[];
   const safeClasses = Array.isArray(rawClasses) ? rawClasses : [];
   const seen = new Set<string>();
   const uniqueClasses: Class[] = [];
@@ -857,14 +868,14 @@ export async function getClasses(): Promise<Class[]> {
 }
 
 // Fetch All Teachers
-export async function getTeachers(): Promise<Teacher[]> {
-  const list = await fetchAndFilterCollection(TEACHERS_COLL);
+export async function getTeachers(force: boolean = false): Promise<Teacher[]> {
+  const list = await fetchAndFilterCollection(TEACHERS_COLL, force);
   return Array.isArray(list) ? (list as Teacher[]) : [];
 }
 
 // Fetch All Students
-export async function getStudents(): Promise<Student[]> {
-  const list = await fetchAndFilterCollection(STUDENTS_COLL);
+export async function getStudents(force: boolean = false): Promise<Student[]> {
+  const list = await fetchAndFilterCollection(STUDENTS_COLL, force);
   return Array.isArray(list) ? (list as Student[]) : [];
 }
 
@@ -1914,7 +1925,7 @@ export async function seedDatabaseIfEmpty(): Promise<boolean> {
 }
 
 // --- SCHOOL SETTINGS ---
-export async function getSchoolName(): Promise<string> {
+export async function getSchoolName(force: boolean = false): Promise<string> {
   const eff = getEffectiveUidAndEmail();
   const uid = eff.uid;
   const email = eff.email;
@@ -1922,7 +1933,7 @@ export async function getSchoolName(): Promise<string> {
     return "";
   }
   
-  if (typeof window !== "undefined") {
+  if (!force && typeof window !== "undefined") {
     const localName = localStorage.getItem(`school_name_${uid}`);
     if (localName) return localName;
   }
@@ -1937,7 +1948,9 @@ export async function getSchoolName(): Promise<string> {
       }
     });
     if (schoolNameVal && typeof window !== "undefined") {
-      localStorage.setItem(`school_name_${uid}`, schoolNameVal);
+      if (uid) localStorage.setItem(`school_name_${uid}`, schoolNameVal);
+      if (email) localStorage.setItem(`school_name_${email}`, schoolNameVal);
+      localStorage.setItem("school_name_cache", schoolNameVal);
     }
     return schoolNameVal;
   } catch (err: any) {
