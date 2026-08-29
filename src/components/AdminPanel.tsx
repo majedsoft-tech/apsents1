@@ -2532,8 +2532,8 @@ export default function AdminPanel({
             </span>
           </div>
 
-          {/* Sub-navigation Tabs & Print bar */}
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 bg-white p-2 rounded-xl border border-slate-100 shadow-3xs print:hidden">
+          {/* Sub-navigation Tabs & Print bar - Sticky Top on Scroll */}
+          <div className="sticky top-14 md:top-16 z-20 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 bg-white/95 backdrop-blur-md p-2.5 rounded-xl border border-slate-200/90 shadow-sm print:hidden">
             {/* Condensed Tabs Selector */}
             <div className="flex flex-wrap items-center gap-1 bg-slate-100 p-1 rounded-lg" dir="rtl">
               <button
@@ -2638,63 +2638,66 @@ export default function AdminPanel({
                 const absentEntriesCount = gradeEntries.filter((e: any) => !e.isNoAbsenceDummy && e.isAbsent).length;
                 const lateEntriesCount = gradeEntries.filter((e: any) => e.isLate).length;
                 return (
-                  <div key={grade.id} className="flex flex-col rounded-2xl shadow-sm overflow-hidden bg-white border border-slate-200 hover:shadow-md transition-all duration-200">
-                    <div className="bg-[#1e40af] text-white px-3.5 py-2 flex items-center justify-between border-b border-blue-900/20 shadow-3xs">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className="text-xs sm:text-sm font-black">{grade.name}</span>
-                        <span className="bg-rose-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full flex items-center justify-center shadow-3xs">
-                          {absentEntriesCount} غياب
-                        </span>
-                        {lateEntriesCount > 0 && (
-                          <span className="bg-amber-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full flex items-center justify-center shadow-3xs">
-                            {lateEntriesCount} متأخر
+                  <div key={grade.id} className="flex flex-col rounded-2xl shadow-sm bg-white border border-slate-200 hover:shadow-md transition-all duration-200">
+                    {/* Sticky Card Header: Grade Title + Classrooms */}
+                    <div className="sticky top-[115px] md:top-[128px] z-10 shadow-xs rounded-t-2xl overflow-hidden">
+                      <div className="bg-[#1e40af] text-white px-3.5 py-2 flex items-center justify-between border-b border-blue-900/20 shadow-3xs">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-xs sm:text-sm font-black">{grade.name}</span>
+                          <span className="bg-rose-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full flex items-center justify-center shadow-3xs">
+                            {absentEntriesCount} غياب
                           </span>
+                          {lateEntriesCount > 0 && (
+                            <span className="bg-amber-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full flex items-center justify-center shadow-3xs">
+                              {lateEntriesCount} متأخر
+                            </span>
+                          )}
+                        </div>
+                        <span className="bg-blue-700/90 text-white text-[10px] font-extrabold px-2 py-0.5 rounded-md">
+                          {getTodayFormattedArabic()}
+                        </span>
+                      </div>
+
+                      {/* All classrooms/sections list bar */}
+                      <div className="bg-[#172554] px-3 py-1.5 flex items-center justify-center gap-1.5 border-b border-blue-900/40 flex-wrap">
+                        {gradeClasses.length === 0 ? (
+                          <span className="text-[9px] text-blue-300/80 font-bold">لا توجد فصول مسجلة</span>
+                        ) : (
+                          gradeClasses.map(cls => {
+                            const cCode = getClassCode(cls.name);
+                            const count = gradeEntries.filter((entry: any) => entry.classId === cls.id && (entry.isAbsent || entry.isLate)).length;
+                            const hasAbsence = count > 0;
+                            return (
+                              <span
+                                key={cls.id}
+                                className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded-md border flex items-center gap-1 shadow-3xs transition ${
+                                hasAbsence
+                                    ? "bg-rose-50 text-rose-700 border-rose-200 font-black"
+                                    : "bg-slate-50/10 text-slate-300 border-slate-700/50 hover:bg-slate-50/20"
+                                }`}
+                              >
+                                <span>{cCode}:</span>
+                                <span>({count})</span>
+                              </span>
+                            );
+                          })
                         )}
                       </div>
-                      <span className="bg-blue-700/90 text-white text-[10px] font-extrabold px-2 py-0.5 rounded-md">
-                        {getTodayFormattedArabic()}
-                      </span>
                     </div>
 
-                    {/* All classrooms/sections list bar */}
-                    <div className="bg-[#172554] px-3 py-1.5 flex items-center justify-center gap-1.5 border-b border-blue-900/40 flex-wrap">
-                      {gradeClasses.length === 0 ? (
-                        <span className="text-[9px] text-blue-300/80 font-bold">لا توجد فصول مسجلة</span>
-                      ) : (
-                        gradeClasses.map(cls => {
-                          const cCode = getClassCode(cls.name);
-                          const count = gradeEntries.filter((entry: any) => entry.classId === cls.id && (entry.isAbsent || entry.isLate)).length;
-                          const hasAbsence = count > 0;
-                          return (
-                            <span
-                              key={cls.id}
-                              className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded-md border flex items-center gap-1 shadow-3xs transition ${
-                              hasAbsence
-                                  ? "bg-rose-50 text-rose-700 border-rose-200 font-black"
-                                  : "bg-slate-50/10 text-slate-300 border-slate-700/50 hover:bg-slate-50/20"
-                              }`}
-                            >
-                              <span>{cCode}:</span>
-                              <span>({count})</span>
-                            </span>
-                          );
-                        })
-                      )}
-                    </div>
-
-                    <div className="bg-white overflow-hidden flex-1">
+                    <div className="bg-white rounded-b-2xl overflow-hidden flex-1">
                       {/* DESKTOP VIEW: Full Data Table (Hidden on small mobile screens) */}
                       <div className="hidden md:block overflow-x-auto">
                         <table className="w-full text-right text-xs" dir="rtl">
-                          <thead className="bg-slate-50 text-slate-500 font-extrabold text-[10px] border-b border-slate-100">
+                          <thead className="bg-slate-100/95 backdrop-blur-xs text-slate-600 font-extrabold text-[10px] border-b border-slate-200 sticky top-[188px] md:top-[200px] z-10 shadow-3xs">
                             <tr>
-                              <th className="py-1 px-1 text-center w-6">#</th>
-                              <th className="py-1 px-1 text-right font-black">الوقت</th>
-                              <th className="py-1 px-1.5 text-right font-black">اسم الطالب</th>
-                              <th className="py-1 px-0.5 text-center font-black">الحصة</th>
-                              <th className="py-1 px-0.5 text-center font-black">الفصل</th>
-                              <th className="py-1 px-1 text-right font-black">المعلم المعتمد</th>
-                              {!isReadOnly && <th className="py-1 px-0.5 text-center">⚙️</th>}
+                              <th className="py-1.5 px-1 text-center w-6">#</th>
+                              <th className="py-1.5 px-1 text-right font-black">الوقت</th>
+                              <th className="py-1.5 px-1.5 text-right font-black">اسم الطالب</th>
+                              <th className="py-1.5 px-0.5 text-center font-black">الحصة</th>
+                              <th className="py-1.5 px-0.5 text-center font-black">الفصل</th>
+                              <th className="py-1.5 px-1 text-right font-black">المعلم المعتمد</th>
+                              {!isReadOnly && <th className="py-1.5 px-0.5 text-center">⚙️</th>}
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100">
