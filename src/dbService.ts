@@ -2056,13 +2056,9 @@ function subscribeToCollection(colName: string, callback: (data: any[]) => void,
           } catch (_) {}
         }
       }, (error: any) => {
-        if (!firebaseAuth.currentUser) {
-          hub.latestData = [];
-          hub.callbacks.forEach(cb => { try { cb([]); } catch (_) {} });
-          return;
-        }
-        const activeUid = firebaseAuth.currentUser.uid;
-        const activeEmail = firebaseAuth.currentUser.email?.toLowerCase() || "";
+        const eff = getEffectiveUidAndEmail();
+        const activeUid = eff.uid;
+        const activeEmail = eff.email;
         const fallbackRaw = getLocalItems(colName, activeUid);
         const fallbackList = Array.isArray(fallbackRaw) ? fallbackRaw.filter(item => isDocBelongingToUser(item, activeUid, activeEmail)) : [];
         hub.latestData = fallbackList;
@@ -2144,15 +2140,19 @@ export function subscribeToStudents(callback: (students: Student[]) => void, onE
 
 // Subscribe School Name in real-time
 export function subscribeToSchoolName(callback: (schoolName: string) => void, onError?: (error: any) => void) {
-  if (!firebaseAuth.currentUser) {
+  const eff = getEffectiveUidAndEmail();
+  const currentUid = eff.uid;
+  const currentEmail = eff.email;
+
+  if (!currentUid && !currentEmail) {
     callback("");
     return () => {};
   }
-  const currentUid = firebaseAuth.currentUser.uid;
-  const currentEmail = firebaseAuth.currentUser.email?.toLowerCase() || "";
 
   if (typeof window !== "undefined") {
-    const cached = localStorage.getItem(`school_name_${currentUid}`);
+    const cached = (currentUid ? localStorage.getItem(`school_name_${currentUid}`) : null) || 
+      (currentEmail ? localStorage.getItem(`school_name_${currentEmail}`) : null) ||
+      localStorage.getItem("school_name_cache");
     if (cached) callback(cached);
   }
 
@@ -2164,7 +2164,9 @@ export function subscribeToSchoolName(callback: (schoolName: string) => void, on
       }
     });
     if (schoolNameVal && typeof window !== "undefined") {
-      localStorage.setItem(`school_name_${currentUid}`, schoolNameVal);
+      if (currentUid) localStorage.setItem(`school_name_${currentUid}`, schoolNameVal);
+      if (currentEmail) localStorage.setItem(`school_name_${currentEmail}`, schoolNameVal);
+      localStorage.setItem("school_name_cache", schoolNameVal);
     }
     callback(schoolNameVal || "");
   }, onError);
