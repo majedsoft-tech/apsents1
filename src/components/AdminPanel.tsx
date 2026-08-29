@@ -2638,9 +2638,9 @@ export default function AdminPanel({
                 const absentEntriesCount = gradeEntries.filter((e: any) => !e.isNoAbsenceDummy && e.isAbsent).length;
                 const lateEntriesCount = gradeEntries.filter((e: any) => e.isLate).length;
                 return (
-                  <div key={grade.id} className="flex flex-col rounded-2xl shadow-sm bg-white border border-slate-200 hover:shadow-md transition-all duration-200">
-                    {/* Sticky Card Header: Grade Title + Classrooms */}
-                    <div className="sticky top-[115px] md:top-[128px] z-10 shadow-xs rounded-t-2xl overflow-hidden">
+                  <div key={grade.id} className="flex flex-col rounded-2xl shadow-sm bg-white border border-slate-200 hover:shadow-md transition-all duration-200 overflow-hidden">
+                    {/* Card Header: Grade Title + Classrooms */}
+                    <div className="rounded-t-2xl overflow-hidden">
                       <div className="bg-[#1e40af] text-white px-3.5 py-2 flex items-center justify-between border-b border-blue-900/20 shadow-3xs">
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <span className="text-xs sm:text-sm font-black">{grade.name}</span>
@@ -2685,19 +2685,19 @@ export default function AdminPanel({
                       </div>
                     </div>
 
-                    <div className="bg-white rounded-b-2xl overflow-hidden flex-1">
+                    <div className="bg-white flex-1">
                       {/* DESKTOP VIEW: Full Data Table (Hidden on small mobile screens) */}
                       <div className="hidden md:block overflow-x-auto">
                         <table className="w-full text-right text-xs" dir="rtl">
-                          <thead className="bg-slate-100/95 backdrop-blur-xs text-slate-600 font-extrabold text-[10px] border-b border-slate-200 sticky top-[188px] md:top-[200px] z-10 shadow-3xs">
+                          <thead className="bg-slate-100 text-slate-700 font-extrabold text-[10px] border-b border-slate-200">
                             <tr>
-                              <th className="py-1.5 px-1 text-center w-6">#</th>
-                              <th className="py-1.5 px-1 text-right font-black">الوقت</th>
-                              <th className="py-1.5 px-1.5 text-right font-black">اسم الطالب</th>
-                              <th className="py-1.5 px-0.5 text-center font-black">الحصة</th>
-                              <th className="py-1.5 px-0.5 text-center font-black">الفصل</th>
-                              <th className="py-1.5 px-1 text-right font-black">المعلم المعتمد</th>
-                              {!isReadOnly && <th className="py-1.5 px-0.5 text-center">⚙️</th>}
+                              <th className="py-2 px-1 text-center w-6">#</th>
+                              <th className="py-2 px-1 text-right font-black">الوقت</th>
+                              <th className="py-2 px-1.5 text-right font-black">اسم الطالب</th>
+                              <th className="py-2 px-0.5 text-center font-black">الحصة</th>
+                              <th className="py-2 px-0.5 text-center font-black">الفصل</th>
+                              <th className="py-2 px-1 text-right font-black">المعلم المعتمد</th>
+                              {!isReadOnly && <th className="py-2 px-0.5 text-center">⚙️</th>}
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100">

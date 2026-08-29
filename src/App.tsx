@@ -1540,6 +1540,7 @@ export default function App() {
             currentTime={currentTime}
             currentUser={currentUser}
             onGoogleLogin={handleGoogleLogin}
+            isStatsOnly={appMode === "stats-only"}
           />
         )}
 

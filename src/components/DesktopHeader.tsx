@@ -23,6 +23,7 @@ interface DesktopHeaderProps {
   currentTime?: string;
   currentUser?: any;
   onGoogleLogin?: () => void;
+  isStatsOnly?: boolean;
 }
 
 export default function DesktopHeader({
@@ -36,7 +37,8 @@ export default function DesktopHeader({
   todayBehaviorCount = 0,
   currentTime,
   currentUser,
-  onGoogleLogin
+  onGoogleLogin,
+  isStatsOnly = false
 }: DesktopHeaderProps) {
   const getTodayArabicDate = () => {
     const d = new Date();
@@ -64,18 +66,20 @@ export default function DesktopHeader({
             <h2 className="text-sm font-black text-slate-900 tracking-tight">
               {schoolName || "SmartSchool - البوابة المدرسية الرقمية"}
             </h2>
-            <button
-              type="button"
-              onClick={onEditSchoolName}
-              className="text-slate-400 hover:text-blue-600 transition p-1 hover:bg-slate-100 rounded-lg cursor-pointer"
-              title="تعديل اسم المدرسة"
-            >
-              {isSavingSchoolName ? (
-                <Loader2 className="w-3.5 h-3.5 text-blue-500 animate-spin" />
-              ) : (
-                <Edit2 className="w-3.5 h-3.5" />
-              )}
-            </button>
+            {!isStatsOnly && onEditSchoolName && (
+              <button
+                type="button"
+                onClick={onEditSchoolName}
+                className="text-slate-400 hover:text-blue-600 transition p-1 hover:bg-slate-100 rounded-lg cursor-pointer"
+                title="تعديل اسم المدرسة"
+              >
+                {isSavingSchoolName ? (
+                  <Loader2 className="w-3.5 h-3.5 text-blue-500 animate-spin" />
+                ) : (
+                  <Edit2 className="w-3.5 h-3.5" />
+                )}
+              </button>
+            )}
           </div>
           <div className="flex items-center gap-2 text-[11px] text-slate-500 font-bold mt-0.5">
             <span className="flex items-center gap-1">
@@ -112,17 +116,19 @@ export default function DesktopHeader({
           </span>
         </div>
 
-        {/* Share Modal Trigger */}
-        <button
-          type="button"
-          onClick={onOpenShareModal}
-          id="btn-desktop-share-links"
-          className="flex items-center gap-1.5 px-3.5 py-1.5 bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 rounded-xl text-xs font-black transition cursor-pointer shadow-3xs"
-          title="مشاركة الروابط للمعلمين والمشرفين"
-        >
-          <Share2 className="w-3.5 h-3.5 text-blue-600" />
-          <span>مشاركة الروابط</span>
-        </button>
+        {/* Share Modal Trigger (Hidden in stats-only mode) */}
+        {!isStatsOnly && (
+          <button
+            type="button"
+            onClick={onOpenShareModal}
+            id="btn-desktop-share-links"
+            className="flex items-center gap-1.5 px-3.5 py-1.5 bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 rounded-xl text-xs font-black transition cursor-pointer shadow-3xs"
+            title="مشاركة الروابط للمعلمين والمشرفين"
+          >
+            <Share2 className="w-3.5 h-3.5 text-blue-600" />
+            <span>مشاركة الروابط</span>
+          </button>
+        )}
 
         {/* Refresh Button */}
         <button
@@ -136,21 +142,23 @@ export default function DesktopHeader({
           <span>تحديث</span>
         </button>
 
-        {/* Auth status */}
-        {!currentUser || currentUser?.isGuest ? (
-          <button
-            type="button"
-            onClick={onGoogleLogin}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-amber-950 rounded-xl text-xs font-black transition cursor-pointer shadow-3xs"
-          >
-            <CloudOff className="w-3.5 h-3.5" />
-            <span>تسجيل بـ Google</span>
-          </button>
-        ) : (
-          <div className="flex items-center gap-2 px-3 py-1.5 bg-indigo-50 border border-indigo-200 text-indigo-900 rounded-xl text-xs font-bold">
-            <Cloud className="w-3.5 h-3.5 text-indigo-600" />
-            <span className="truncate max-w-[140px]">{currentUser.displayName || "مدير المدرسة"}</span>
-          </div>
+        {/* Auth status (Hidden in stats-only mode) */}
+        {!isStatsOnly && (
+          !currentUser || currentUser?.isGuest ? (
+            <button
+              type="button"
+              onClick={onGoogleLogin}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-amber-950 rounded-xl text-xs font-black transition cursor-pointer shadow-3xs"
+            >
+              <CloudOff className="w-3.5 h-3.5" />
+              <span>تسجيل بـ Google</span>
+            </button>
+          ) : (
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-indigo-50 border border-indigo-200 text-indigo-900 rounded-xl text-xs font-bold">
+              <Cloud className="w-3.5 h-3.5 text-indigo-600" />
+              <span className="truncate max-w-[140px]">{currentUser.displayName || "مدير المدرسة"}</span>
+            </div>
+          )
         )}
       </div>
     </header>
