@@ -598,7 +598,7 @@ export default function MorningDelayPortal({
 
                 {/* 1. LIST VIEW (Default - Exact match to Teacher Attendance Portal) */}
                 {classViewMode === "list" ? (
-                  <div className="divide-y divide-slate-100">
+                  <div className="divide-y divide-slate-100 max-w-full">
                     {classStudents.map((st, idx) => {
                       const isRecorded = records.some(r => r.studentId === st.id);
                       const isSaving = savingStudentId === st.id;
@@ -607,51 +607,45 @@ export default function MorningDelayPortal({
                       return (
                         <div
                           key={st.id}
-                          onClick={() => !isSaving && handleRecordStudent(st)}
-                          className={`flex items-center justify-between px-4 py-3.5 sm:py-3.5 min-h-[48px] cursor-pointer transition select-none active:scale-[0.99] active:bg-slate-100/80 ${
+                          onClick={() => {
+                            if (isSaving) return;
+                            if (isRecorded) {
+                              const currentRec = rec || records.find(r => r.studentId === st.id);
+                              if (currentRec) {
+                                handleDeleteRecord(currentRec.id, st.name, currentRec.studentId || st.id, currentRec.date || selectedDate);
+                              }
+                            } else {
+                              handleRecordStudent(st);
+                            }
+                          }}
+                          className={`flex items-center justify-between px-3 sm:px-4 py-3 min-h-[48px] w-full max-w-full cursor-pointer transition select-none active:scale-[0.99] active:bg-slate-100/80 ${
                             isRecorded ? "bg-amber-50/70 hover:bg-amber-100/60" : "bg-white hover:bg-slate-50"
                           }`}
                         >
-                          <div className="flex items-center gap-3">
+                          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 flex-1 pl-2">
                             <span className={`text-xs font-black w-7 h-7 flex items-center justify-center rounded-full shrink-0 ${
-                              isRecorded ? "bg-amber-500 text-white" : "bg-slate-100 text-slate-700"
+                              isRecorded ? "bg-amber-500 text-white shadow-3xs" : "bg-slate-100 text-slate-700"
                             }`}>
                               {idx + 1}
                             </span>
-                            <span className="text-xs sm:text-sm font-bold text-slate-800">
+                            <span className="text-xs sm:text-sm font-bold text-slate-800 truncate block">
                               {st.name}
                             </span>
                           </div>
 
-                          <div className="transition-all duration-200">
+                          <div className="shrink-0 transition-all duration-150 flex items-center">
                             {isSaving ? (
-                              <span className="inline-flex items-center gap-1.5 text-xs font-bold text-amber-700 bg-amber-100 px-3 py-1.5 rounded-xl animate-pulse">
+                              <span className="inline-flex items-center justify-center gap-1 text-xs font-bold text-amber-700 bg-amber-100 px-3 py-1.5 rounded-xl animate-pulse min-w-[76px]">
                                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                <span>جاري الرصد...</span>
+                                <span>رصد...</span>
                               </span>
                             ) : isRecorded ? (
-                              <div className="flex items-center gap-1.5">
-                                <span className="inline-flex items-center gap-1.5 text-xs font-black text-amber-800 bg-amber-100 border border-amber-300 px-3 py-1.5 rounded-xl shadow-2xs">
-                                  <span>متأخر</span>
-                                  <span>⏳</span>
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    const currentRec = rec || records.find(r => r.studentId === st.id);
-                                    if (currentRec) {
-                                      handleDeleteRecord(currentRec.id, st.name, currentRec.studentId || st.id, currentRec.date || selectedDate);
-                                    }
-                                  }}
-                                  className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-100 rounded-lg transition cursor-pointer"
-                                  title="إلغاء تسجيل التأخر"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              </div>
+                              <span className="inline-flex items-center justify-center gap-1.5 text-xs font-black text-amber-800 bg-amber-100 border border-amber-300 px-3 py-1.5 rounded-xl shadow-2xs min-w-[76px]">
+                                <span>متأخر</span>
+                                <span>⏳</span>
+                              </span>
                             ) : (
-                              <span className="inline-flex items-center gap-1.5 text-xs font-black text-slate-400 hover:text-amber-700 bg-slate-50 hover:bg-amber-50 border border-slate-200 hover:border-amber-300 px-3 py-1.5 rounded-xl transition">
+                              <span className="inline-flex items-center justify-center gap-1 text-xs font-black text-slate-400 hover:text-amber-700 bg-slate-50 hover:bg-amber-50 border border-slate-200 hover:border-amber-300 px-3 py-1.5 rounded-xl transition min-w-[76px]">
                                 <span>+ تسجيل</span>
                               </span>
                             )}
