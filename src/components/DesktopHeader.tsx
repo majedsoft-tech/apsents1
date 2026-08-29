@@ -24,6 +24,9 @@ interface DesktopHeaderProps {
   currentUser?: any;
   onGoogleLogin?: () => void;
   isStatsOnly?: boolean;
+  onSyncCloudData?: () => Promise<void>;
+  isSyncingCloud?: boolean;
+  syncCloudSuccess?: boolean;
 }
 
 export default function DesktopHeader({
@@ -38,7 +41,10 @@ export default function DesktopHeader({
   currentTime,
   currentUser,
   onGoogleLogin,
-  isStatsOnly = false
+  isStatsOnly = false,
+  onSyncCloudData,
+  isSyncingCloud = false,
+  syncCloudSuccess = false
 }: DesktopHeaderProps) {
   const getTodayArabicDate = () => {
     const d = new Date();
@@ -115,6 +121,38 @@ export default function DesktopHeader({
             {todayAbsentCount} طالب
           </span>
         </div>
+
+        {/* Cloud Sync Button */}
+        {onSyncCloudData && (
+          <button
+            type="button"
+            onClick={onSyncCloudData}
+            disabled={isSyncingCloud}
+            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-black transition cursor-pointer shadow-3xs ${
+              syncCloudSuccess
+                ? "bg-emerald-500 text-white"
+                : "bg-indigo-600 hover:bg-indigo-700 text-white"
+            }`}
+            title="مزامنة فورية وحفظ البيانات في السحابة"
+          >
+            {isSyncingCloud ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <span>جاري المزامنة...</span>
+              </>
+            ) : syncCloudSuccess ? (
+              <>
+                <Cloud className="w-3.5 h-3.5" />
+                <span>تمت المزامنة بنجاح!</span>
+              </>
+            ) : (
+              <>
+                <Cloud className="w-3.5 h-3.5" />
+                <span>⚡ مزامنة سحابية</span>
+              </>
+            )}
+          </button>
+        )}
 
         {/* Share Modal Trigger (Hidden in stats-only mode) */}
         {!isStatsOnly && (

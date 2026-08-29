@@ -226,6 +226,8 @@ export default function App() {
   const [copied, setCopied] = useState<boolean>(false);
   const [teacherCopied, setTeacherCopied] = useState<boolean>(false);
   const [morningDelayCopied, setMorningDelayCopied] = useState<boolean>(false);
+  const [isSyncingCloud, setIsSyncingCloud] = useState<boolean>(false);
+  const [syncCloudSuccess, setSyncCloudSuccess] = useState<boolean>(false);
   const [teacherTab, setTeacherTab] = useState<"attendance" | "behavior">(getInitialTeacherTab());
   const [adminTab, setAdminTab] = useState<"stats" | "grades" | "teachers" | "students">(getInitialAdminTab());
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState<boolean>(false);
@@ -597,6 +599,21 @@ export default function App() {
         setTimeout(() => setAdminSyncCopied(false), 2500);
       }
     });
+  };
+
+  const handleSyncCloudData = async () => {
+    setIsSyncingCloud(true);
+    setSyncCloudSuccess(false);
+    try {
+      await syncAllLocalDataToFirestore();
+      await handleRefreshData();
+      setSyncCloudSuccess(true);
+      setTimeout(() => setSyncCloudSuccess(false), 4000);
+    } catch (err) {
+      console.error("Error syncing data with cloud:", err);
+    } finally {
+      setIsSyncingCloud(false);
+    }
   };
 
   const handleCopySchoolCode = (code: string) => {
@@ -1541,6 +1558,9 @@ export default function App() {
             currentUser={currentUser}
             onGoogleLogin={handleGoogleLogin}
             isStatsOnly={appMode === "stats-only"}
+            onSyncCloudData={handleSyncCloudData}
+            isSyncingCloud={isSyncingCloud}
+            syncCloudSuccess={syncCloudSuccess}
           />
         )}
 
@@ -1725,11 +1745,16 @@ export default function App() {
         delayCopied={morningDelayCopied}
         onCopyStatsLink={handleCopyStatsLink}
         statsCopied={copied}
+        onCopyAdminSyncLink={handleCopyAdminSyncLink}
+        adminSyncCopied={adminSyncCopied}
+        onSyncCloudData={handleSyncCloudData}
+        isSyncingCloud={isSyncingCloud}
+        syncCloudSuccess={syncCloudSuccess}
         hasGradesAndClasses={hasGradesAndClasses}
         hasTeachers={hasTeachers}
       />
 
-      {/* Quick Share Links Modal */}
+      {/* Quick Share Links & Cloud Sync Modal */}
       <ShareLinksModal
         isOpen={isShareModalOpen}
         onClose={() => setIsShareModalOpen(false)}
@@ -1740,6 +1765,13 @@ export default function App() {
         delayCopied={morningDelayCopied}
         onCopyStatsLink={handleCopyStatsLink}
         statsCopied={copied}
+        onCopyAdminSyncLink={handleCopyAdminSyncLink}
+        adminSyncCopied={adminSyncCopied}
+        onSyncCloudData={handleSyncCloudData}
+        isSyncingCloud={isSyncingCloud}
+        syncCloudSuccess={syncCloudSuccess}
+        isGoogleAuthenticated={!!currentUser && !currentUser.isGuest}
+        onGoogleLogin={handleGoogleLogin}
       />
 
       {/* School Name Edit Modal */}

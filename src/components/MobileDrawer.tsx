@@ -39,6 +39,11 @@ interface MobileDrawerProps {
   delayCopied: boolean;
   onCopyStatsLink: () => void;
   statsCopied: boolean;
+  onCopyAdminSyncLink?: () => void;
+  adminSyncCopied?: boolean;
+  onSyncCloudData?: () => Promise<void>;
+  isSyncingCloud?: boolean;
+  syncCloudSuccess?: boolean;
   hasGradesAndClasses?: boolean;
   hasTeachers?: boolean;
 }
@@ -59,7 +64,12 @@ export default function MobileDrawer({
   onCopyDelayLink,
   delayCopied,
   onCopyStatsLink,
-  statsCopied
+  statsCopied,
+  onCopyAdminSyncLink,
+  adminSyncCopied = false,
+  onSyncCloudData,
+  isSyncingCloud = false,
+  syncCloudSuccess = false
 }: MobileDrawerProps) {
   if (!isOpen) return null;
 
@@ -98,9 +108,55 @@ export default function MobileDrawer({
           {/* Quick Share Links Section */}
           <div className="space-y-2">
             <span className="text-[11px] font-black text-slate-400 uppercase tracking-wider">
-              روابط المشاركة السريعة
+              المزامنة السحابية وروابط المشاركة
             </span>
-            <div className="space-y-1.5">
+
+            {/* Cloud Sync Button */}
+            {onSyncCloudData && (
+              <button
+                type="button"
+                onClick={onSyncCloudData}
+                disabled={isSyncingCloud}
+                className="w-full flex items-center justify-between p-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black transition shadow-sm cursor-pointer disabled:opacity-75"
+              >
+                <div className="flex items-center gap-2">
+                  <Cloud className="w-4 h-4" />
+                  <span>{isSyncingCloud ? "جاري المزامنة مع السحابة..." : "⚡ مزامنة ورفع البيانات سحابياً"}</span>
+                </div>
+                {syncCloudSuccess ? (
+                  <span className="text-emerald-300 flex items-center gap-1 text-[10px]">
+                    <Check className="w-3.5 h-3.5" /> تمت المزامنة
+                  </span>
+                ) : (
+                  <span className="text-[10px] bg-indigo-500/80 px-2 py-0.5 rounded-md font-bold">
+                    حفظ سحابي
+                  </span>
+                )}
+              </button>
+            )}
+
+            <div className="space-y-1.5 pt-1">
+              {/* Admin Sync Link */}
+              {onCopyAdminSyncLink && (
+                <button
+                  type="button"
+                  onClick={onCopyAdminSyncLink}
+                  className="w-full flex items-center justify-between p-2.5 bg-slate-100 hover:bg-slate-200/80 border border-slate-300 rounded-xl text-xs font-black text-slate-900 transition cursor-pointer"
+                >
+                  <div className="flex items-center gap-2">
+                    <Copy className="w-4 h-4 text-slate-700" />
+                    <span>رابط لوحة التحكم المربوطة سحابياً</span>
+                  </div>
+                  {adminSyncCopied ? (
+                    <span className="text-emerald-600 flex items-center gap-1 text-[10px]">
+                      <Check className="w-3 h-3" /> تم النسخ
+                    </span>
+                  ) : (
+                    <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
+                  )}
+                </button>
+              )}
+
               <button
                 type="button"
                 onClick={onCopyTeacherLink}
