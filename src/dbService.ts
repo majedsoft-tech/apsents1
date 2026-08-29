@@ -165,26 +165,62 @@ function getLocalItems(colName: string, uid?: string): any[] {
   const currentEmail = eff.email?.toLowerCase() || "";
   if (typeof window === "undefined") return [];
   try {
+    const gatheredMap = new Map<string, any>();
+
+    // 1. Try UID specific key
     if (currentUid) {
       const rawUser = localStorage.getItem(`school_offline_cache_${currentUid}_${colName}`);
       if (rawUser) {
-        const parsed = JSON.parse(rawUser);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        try {
+          const parsed = JSON.parse(rawUser);
+          if (Array.isArray(parsed)) {
+            parsed.forEach(item => { if (item?.id) gatheredMap.set(item.id, item); });
+          }
+        } catch (_) {}
       }
     }
+
+    // 2. Try Email specific key
     if (currentEmail) {
       const rawEmail = localStorage.getItem(`school_offline_cache_${currentEmail}_${colName}`);
       if (rawEmail) {
-        const parsed = JSON.parse(rawEmail);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        try {
+          const parsed = JSON.parse(rawEmail);
+          if (Array.isArray(parsed)) {
+            parsed.forEach(item => { if (item?.id && !gatheredMap.has(item.id)) gatheredMap.set(item.id, item); });
+          }
+        } catch (_) {}
       }
     }
+
+    // 3. Try generic key
     const rawGeneric = localStorage.getItem(`school_offline_cache_${colName}`);
     if (rawGeneric) {
-      const parsed = JSON.parse(rawGeneric);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      try {
+        const parsed = JSON.parse(rawGeneric);
+        if (Array.isArray(parsed)) {
+          parsed.forEach(item => { if (item?.id && !gatheredMap.has(item.id)) gatheredMap.set(item.id, item); });
+        }
+      } catch (_) {}
     }
-    return [];
+
+    // 4. Scan all other localStorage keys matching this collection name
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith("school_offline_cache_") && key.endsWith(`_${colName}`)) {
+        try {
+          const raw = localStorage.getItem(key);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) {
+              parsed.forEach(item => { if (item?.id && !gatheredMap.has(item.id)) gatheredMap.set(item.id, item); });
+            }
+          }
+        } catch (_) {}
+      }
+    }
+
+    return Array.from(gatheredMap.values());
   } catch (e) {
     return [];
   }
@@ -633,11 +669,13 @@ export async function migrateGuestDataToUser(guestUid: string, userUid: string, 
 }
 
 // Helper to fully synchronize all local cached records to Firestore
-export async function syncAllLocalDataToFirestore(): Promise<void> {
+export async function syncAllLocalDataToFirestore(): Promise<{ count: number; success: boolean; message: string }> {
   const eff = getEffectiveUidAndEmail();
   const uid = eff.uid;
   const email = eff.email;
-  if (!uid) return;
+  if (!uid && !email) {
+    return { count: 0, success: false, message: "يجب تسجيل الدخول أولاً لتتم المزامنة السحابية." };
+  }
 
   const collections = [
     GRADES_COLL,
@@ -649,38 +687,66 @@ export async function syncAllLocalDataToFirestore(): Promise<void> {
     MORNING_DELAYS_COLL
   ];
 
+  let totalSynced = 0;
+
   try {
     for (const colName of collections) {
-      const items = getLocalItems(colName, uid).filter(item => isDocBelongingToUser(item, uid, email));
-      if (items.length === 0) continue;
+      const items = getLocalItems(colName, uid);
+      if (!Array.isArray(items) || items.length === 0) continue;
       
-      const chunkSize = 400;
-      for (let i = 0; i < items.length; i += chunkSize) {
-        const chunk = items.slice(i, i + chunkSize);
-        const batch = writeBatch(db);
-        chunk.forEach(item => {
-          if (!item || !item.id) return;
-          const docRef = doc(db, colName, item.id);
-          batch.set(docRef, {
+      const normalizedItems: any[] = [];
+      const seenIds = new Set<string>();
+
+      items.forEach(item => {
+        if (!item || !item.id || seenIds.has(item.id)) return;
+        seenIds.add(item.id);
+        const itemBelongs = isDocBelongingToUser(item, uid, email);
+        const isOrphan = !item.userId && !item.userEmail;
+
+        if (itemBelongs || isOrphan) {
+          normalizedItems.push({
             ...item,
             userId: item.userId || uid,
             userEmail: item.userEmail || email,
             updatedAt: Date.now()
-          }, { merge: true });
+          });
+        }
+      });
+
+      if (normalizedItems.length === 0) continue;
+
+      // Update local storage with properly claimed records
+      setLocalItems(colName, normalizedItems, uid);
+      if (email) setLocalItems(colName, normalizedItems, email);
+
+      const chunkSize = 350;
+      for (let i = 0; i < normalizedItems.length; i += chunkSize) {
+        const chunk = normalizedItems.slice(i, i + chunkSize);
+        const batch = writeBatch(db);
+        chunk.forEach(item => {
+          const docRef = doc(db, colName, item.id);
+          batch.set(docRef, item, { merge: true });
         });
-        const commitPromise = batch.commit().catch(() => {});
-        await safeFirestoreWrite(commitPromise, 500);
+        try {
+          await batch.commit();
+          totalSynced += chunk.length;
+        } catch (commitErr) {
+          console.warn(`Firestore batch commit issue for ${colName}:`, commitErr);
+        }
       }
     }
 
     const storedName = typeof window !== "undefined" 
-      ? (localStorage.getItem(`school_name_${uid}`) || (email ? localStorage.getItem(`school_name_${email}`) : null)) 
+      ? (localStorage.getItem(`school_name_${uid}`) || (email ? localStorage.getItem(`school_name_${email}`) : null) || localStorage.getItem("school_name_cached") || localStorage.getItem("school_name_cache")) 
       : null;
     if (storedName) {
       await saveSchoolName(storedName);
     }
-  } catch (err) {
+
+    return { count: totalSynced, success: true, message: `تمت المزامنة بنجاح وحفظ ${totalSynced} سجلاً في السحابة.` };
+  } catch (err: any) {
     console.error("Error syncing all local data to Firestore:", err);
+    return { count: totalSynced, success: false, message: err?.message || "حدث خطأ أثناء المزامنة." };
   }
 }
 
@@ -811,7 +877,7 @@ async function fetchAndFilterCollection(colName: string, force: boolean = false)
   try {
     const fetchPromise = getDocs(collection(db, colName));
     const timeoutPromise = new Promise<never>((_, reject) => 
-      setTimeout(() => reject(new Error("Firestore fetch timeout")), 2500)
+      setTimeout(() => reject(new Error("Firestore fetch timeout")), 12000)
     );
     const querySnapshot = await Promise.race([fetchPromise, timeoutPromise]);
     const results: any[] = [];
@@ -826,12 +892,15 @@ async function fetchAndFilterCollection(colName: string, force: boolean = false)
     });
 
     // Update local cache and hub with authoritative Firestore data
-    setLocalItems(colName, results, currentUid);
-    const targetHub = getCollectionHub(colName);
-    targetHub.latestData = results;
-    targetHub.lastUpdated = Date.now();
+    if (results.length > 0 || localList.length === 0) {
+      setLocalItems(colName, results, currentUid);
+      if (currentEmail) setLocalItems(colName, results, currentEmail);
+      const targetHub = getCollectionHub(colName);
+      targetHub.latestData = results;
+      targetHub.lastUpdated = Date.now();
+    }
 
-    return results;
+    return results.length > 0 ? results : localList;
   } catch (err: any) {
     handleFirestoreError(err);
     return localList;
