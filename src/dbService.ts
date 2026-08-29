@@ -668,7 +668,8 @@ export async function syncAllLocalDataToFirestore(): Promise<void> {
             updatedAt: Date.now()
           }, { merge: true });
         });
-        await batch.commit().catch(() => {});
+        const commitPromise = batch.commit().catch(() => {});
+        await safeFirestoreWrite(commitPromise, 500);
       }
     }
 
@@ -808,7 +809,11 @@ async function fetchAndFilterCollection(colName: string, force: boolean = false)
   }
 
   try {
-    const querySnapshot = await getDocs(collection(db, colName));
+    const fetchPromise = getDocs(collection(db, colName));
+    const timeoutPromise = new Promise<never>((_, reject) => 
+      setTimeout(() => reject(new Error("Firestore fetch timeout")), 2500)
+    );
+    const querySnapshot = await Promise.race([fetchPromise, timeoutPromise]);
     const results: any[] = [];
     const seenIds = new Set<string>();
     

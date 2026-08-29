@@ -2199,7 +2199,16 @@ export default function AdminPanel({
       setPastedStudentsText("");
       setParsedStudentNames([]);
       setShowAddStudentSection(false);
-      await onRefreshData();
+      
+      // Close the loading modal immediately
+      if (setGlobalProgress) {
+        setGlobalProgress({ active: false, type: null, label: "" });
+      }
+      setSubmitting(prev => ({ ...prev, importStudents: false }));
+      setStatsLoading(false);
+
+      // Background refresh without blocking user UI
+      onRefreshData().catch(() => {});
       
       // Notify user with clear notice if any duplicates were skipped
       if (totalSkipped > 0) {
@@ -2284,6 +2293,11 @@ export default function AdminPanel({
       const totalSkipped = duplicatesWithDb.length + duplicatesInImport.length;
       
       if (uniqueNamesInImport.length === 0) {
+        if (setGlobalProgress) {
+          setGlobalProgress({ active: false, type: null, label: "" });
+        }
+        setSubmitting(prev => ({ ...prev, importTeachers: false }));
+        setStatsLoading(false);
         setAlertState({
           title: "تنبيه: كافة المعلمين مكررين ⚠️",
           message: `جميع الأسماء المدخلة (${totalSkipped} معلم) مكررة ومسجلة بالفعل في المدرسة أو مكررة في القائمة المدخلة. تم تجاهل الإضافة لتفادي التكرار.`,
@@ -2304,7 +2318,16 @@ export default function AdminPanel({
       }
       setPastedTeachersText("");
       setParsedTeacherNames([]);
-      await onRefreshData();
+      
+      // Close modal immediately
+      if (setGlobalProgress) {
+        setGlobalProgress({ active: false, type: null, label: "" });
+      }
+      setSubmitting(prev => ({ ...prev, importTeachers: false }));
+      setStatsLoading(false);
+
+      // Background refresh
+      onRefreshData().catch(() => {});
       
       if (totalSkipped > 0) {
         setAlertState({

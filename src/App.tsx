@@ -151,6 +151,16 @@ export default function App() {
     label: string;
   }>({ active: false, type: null, label: "" });
 
+  // Failsafe auto-dismiss timer for globalProgress to guarantee the modal NEVER gets stuck
+  useEffect(() => {
+    if (globalProgress.active) {
+      const timer = setTimeout(() => {
+        setGlobalProgress({ active: false, type: null, label: "" });
+      }, 3500);
+      return () => clearTimeout(timer);
+    }
+  }, [globalProgress.active]);
+
   // Sidebar Inline School Name Edit States
   const [isEditingSidebarSchool, setIsEditingSidebarSchool] = useState<boolean>(false);
   const [sidebarSchoolInput, setSidebarSchoolInput] = useState<string>("");
@@ -447,10 +457,10 @@ export default function App() {
   const handleRefreshData = async () => {
     setIsRefreshingData(true);
     try {
-      // 1. Sync any pending offline records to Firestore
-      await syncAllLocalDataToFirestore().catch(() => {});
+      // 1. Sync any pending offline records to Firestore in background (non-blocking)
+      syncAllLocalDataToFirestore().catch(() => {});
 
-      // 2. Force fetch authoritative state directly from Firestore
+      // 2. Force fetch authoritative state directly from Firestore (in parallel)
       const [g, c, t, s, sn] = await Promise.all([
         getGrades(true),
         getClasses(true),
@@ -482,7 +492,7 @@ export default function App() {
     } catch (err) {
       console.error("Error refreshing data:", err);
     } finally {
-      setTimeout(() => setIsRefreshingData(false), 500);
+      setIsRefreshingData(false);
     }
   };
 
