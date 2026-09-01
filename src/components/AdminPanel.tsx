@@ -1204,11 +1204,52 @@ export default function AdminPanel({
             className = "الفصل 1";
           }
         }
-        const teacherName = teachers.find(t => t.id === rec.teacherId)?.name || (rec as any).teacherName || "غير محدد";
+
+        let resolvedTeacherName = (rec as any).teacherName || "";
+        if (!resolvedTeacherName && rec.teacherId) {
+          const matchedTeacher = teachers.find(t => t.id === rec.teacherId || t.name === rec.teacherId);
+          if (matchedTeacher && matchedTeacher.name && matchedTeacher.name.trim()) {
+            resolvedTeacherName = matchedTeacher.name.trim();
+          } else if (!rec.teacherId.startsWith("tea_") && !rec.teacherId.startsWith("temp_") && !/^\d{4,}$/.test(rec.teacherId.trim())) {
+            resolvedTeacherName = rec.teacherId;
+          }
+        }
+        if (!resolvedTeacherName) {
+          resolvedTeacherName = "معلم الحصة";
+        }
 
         const pCode = getPeriodCode(rec.period);
         const pTime = getPeriodTime(rec.period);
-        const cCode = getClassCode(className);
+        const defaultCCode = getClassCode(className);
+
+        // Helper to resolve specific student's classroom and code
+        const resolveStudentClassInfo = (stId: string) => {
+          if (stId && stId !== "no-absence") {
+            const stObj = students.find(s => s && (s.id === stId || s.name === stId || s.id?.toLowerCase() === stId.toLowerCase()));
+            if (stObj && stObj.classId) {
+              let stCls = classes.find(c => c.id === stObj.classId || c.name === stObj.classId);
+              if (!stCls) {
+                stCls = classes.find(c => normalizeArabic(c.name) === normalizeArabic(stObj.classId));
+              }
+              if (stCls) {
+                return {
+                  classId: stCls.id,
+                  classCode: getClassCode(stCls.name)
+                };
+              }
+            }
+          }
+          if (cls) {
+            return {
+              classId: cls.id,
+              classCode: getClassCode(cls.name)
+            };
+          }
+          return {
+            classId: rec.classId || "",
+            classCode: defaultCCode
+          };
+        };
 
         let actualTime = "";
         if (rec.timestamp) {
@@ -1287,6 +1328,7 @@ export default function AdminPanel({
         if (!rec.isNoAbsence && rec.absent && rec.absent.length > 0) {
           rec.absent.forEach(stId => {
             const studentName = resolveStudentName(stId, rec);
+            const classInfo = resolveStudentClassInfo(stId);
             const entry = {
               id: `${rec.id}-${stId}-abs`,
               recordId: rec.id,
@@ -1294,10 +1336,10 @@ export default function AdminPanel({
               studentName: studentName || "طالب غائب",
               status: "غائب",
               periodCode: pCode,
-              classCode: cCode,
-              classId: rec.classId,
+              classCode: classInfo.classCode,
+              classId: classInfo.classId,
               gradeId: fallbackGradeId,
-              teacherName,
+              teacherName: resolvedTeacherName,
               time: displayTime,
               isAbsent: true,
               isLate: false
@@ -1323,6 +1365,7 @@ export default function AdminPanel({
         if (rec.late && Array.isArray(rec.late) && rec.late.length > 0) {
           rec.late.forEach(stId => {
             const studentName = resolveStudentName(stId, rec);
+            const classInfo = resolveStudentClassInfo(stId);
             const entry = {
               id: `${rec.id}-${stId}-late`,
               recordId: rec.id,
@@ -1330,10 +1373,10 @@ export default function AdminPanel({
               studentName: studentName || "طالب متأخر",
               status: "متأخر",
               periodCode: pCode,
-              classCode: cCode,
-              classId: rec.classId,
+              classCode: classInfo.classCode,
+              classId: classInfo.classId,
               gradeId: fallbackGradeId,
-              teacherName,
+              teacherName: resolvedTeacherName,
               time: displayTime,
               isAbsent: false,
               isLate: true
@@ -1357,6 +1400,7 @@ export default function AdminPanel({
 
         // 3. Process complete attendance / no absence records
         if (rec.isNoAbsence || ((!rec.absent || rec.absent.length === 0) && (!rec.late || rec.late.length === 0))) {
+          const classInfo = resolveStudentClassInfo("no-absence");
           const entry = {
             id: `${rec.id}-noabs`,
             recordId: rec.id,
@@ -1364,10 +1408,10 @@ export default function AdminPanel({
             studentName: "لا يوجد غياب أو تأخر",
             status: "حضور كامل",
             periodCode: pCode,
-            classCode: cCode,
-            classId: rec.classId,
+            classCode: classInfo.classCode,
+            classId: classInfo.classId,
             gradeId: fallbackGradeId,
-            teacherName,
+            teacherName: resolvedTeacherName,
             time: displayTime,
             isAbsent: false,
             isLate: false,
@@ -1387,6 +1431,73 @@ export default function AdminPanel({
           } else if (normGrade.includes(normalizeArabic("الثالث"))) {
             g3Entries.push(entry);
           }
+        }
+      });
+
+      // 4. Process Today's Morning Delays (التأخر الصباحي)
+      const safeDelays = Array.isArray(delays) ? delays : [];
+      const todayDelays = safeDelays.filter(d => d && d.date === TODAY_DATE);
+
+      todayDelays.forEach(d => {
+        const student = students.find(s => s && (s.id === d.studentId || s.name === d.studentId || s.id?.toLowerCase() === d.studentId?.toLowerCase()));
+        const studentName = d.studentName || student?.name || "طالب متأخر";
+        const studentClassId = student?.classId || "";
+        let matchedCls = classes.find(c => c.id === studentClassId || c.name === studentClassId);
+        if (!matchedCls && studentClassId) {
+          matchedCls = classes.find(c => normalizeArabic(c.name) === normalizeArabic(studentClassId));
+        }
+        const studentGradeId = student?.gradeId || (matchedCls ? matchedCls.gradeId : (grades[0]?.id || "general_grade"));
+        const matchedGrade = grades.find(g => g.id === studentGradeId);
+        const gradeName = matchedGrade?.name || "الصف الدراسي";
+
+        let actualTime = d.arrivalTime || "";
+        if (!actualTime && d.timestamp) {
+          try {
+            let dateObj: Date | null = null;
+            if (typeof d.timestamp.toDate === "function") dateObj = d.timestamp.toDate();
+            else if (d.timestamp.seconds) dateObj = new Date(d.timestamp.seconds * 1000);
+            else if (d.timestamp instanceof Date) dateObj = d.timestamp;
+            else if (typeof d.timestamp === "number" || typeof d.timestamp === "string") dateObj = new Date(d.timestamp);
+            if (dateObj && !isNaN(dateObj.getTime())) {
+              const h = String(dateObj.getHours()).padStart(2, '0');
+              const m = String(dateObj.getMinutes()).padStart(2, '0');
+              actualTime = `${h}:${m}`;
+            }
+          } catch (_) {}
+        }
+        if (!actualTime) actualTime = "07:30";
+
+        const entry = {
+          id: `${d.id}-morning-delay`,
+          recordId: d.id,
+          studentId: d.studentId,
+          studentName,
+          status: "تأخر صباحي",
+          periodCode: "صباحي",
+          classCode: matchedCls ? getClassCode(matchedCls.name) : "ف1",
+          classId: matchedCls?.id || studentClassId,
+          gradeId: studentGradeId,
+          teacherName: d.recordedBy || "المشرف الصباحي",
+          time: actualTime,
+          isAbsent: false,
+          isLate: true,
+          isMorningDelay: true
+        };
+
+        if (!entriesByGrade[studentGradeId]) {
+          entriesByGrade[studentGradeId] = [];
+        }
+        if (!entriesByGrade[studentGradeId].some(e => e.id === entry.id)) {
+          entriesByGrade[studentGradeId].push(entry);
+        }
+
+        const normGrade = normalizeArabic(gradeName);
+        if (normGrade.includes(normalizeArabic("الأول"))) {
+          if (!g1Entries.some(e => e.id === entry.id)) g1Entries.push(entry);
+        } else if (normGrade.includes(normalizeArabic("الثاني"))) {
+          if (!g2Entries.some(e => e.id === entry.id)) g2Entries.push(entry);
+        } else if (normGrade.includes(normalizeArabic("الثالث"))) {
+          if (!g3Entries.some(e => e.id === entry.id)) g3Entries.push(entry);
         }
       });
 
@@ -2692,12 +2803,12 @@ export default function AdminPanel({
                           <thead className="bg-slate-100 text-slate-700 font-extrabold text-[10px] border-b border-slate-200">
                             <tr>
                               <th className="py-2 px-1 text-center w-6">#</th>
-                              <th className="py-2 px-1 text-right font-black">الوقت</th>
+                              <th className="py-2 px-1 text-right font-black w-12">الوقت</th>
                               <th className="py-2 px-1.5 text-right font-black">اسم الطالب</th>
-                              <th className="py-2 px-0.5 text-center font-black">الحصة</th>
-                              <th className="py-2 px-0.5 text-center font-black">الفصل</th>
-                              <th className="py-2 px-1 text-right font-black">المعلم المعتمد</th>
-                              {!isReadOnly && <th className="py-2 px-0.5 text-center">⚙️</th>}
+                              <th className="py-2 px-0.5 text-center font-black w-10">الحصة</th>
+                              <th className="py-2 px-0.5 text-center font-black w-10">الفصل</th>
+                              <th className="py-2 px-1 text-right font-black w-24">المعلم المعتمد</th>
+                              {!isReadOnly && <th className="py-2 px-0.5 text-center w-8">⚙️</th>}
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100">
@@ -2726,7 +2837,7 @@ export default function AdminPanel({
                                   </td>
                                   <td className="py-1 px-1 font-medium text-slate-500 text-[9.5px] whitespace-nowrap">{entry.time}</td>
                                   <td className="py-1 px-1.5">
-                                    <div className="flex items-center gap-1">
+                                    <div className="flex items-center gap-1 min-w-0">
                                       {entry.isNoAbsenceDummy ? (
                                         <span 
                                           className="bg-emerald-600 text-white font-extrabold text-[9.5px] px-1.5 py-0.5 rounded inline-block text-center shadow-3xs whitespace-nowrap"
@@ -2735,25 +2846,25 @@ export default function AdminPanel({
                                           {entry.studentName}
                                         </span>
                                       ) : entry.isMorningDelay ? (
-                                        <div className="flex items-center gap-1">
+                                        <div className="flex items-center gap-1 min-w-0">
                                           <span className="bg-amber-100 text-amber-900 border border-amber-300 text-[8.5px] font-black px-1 py-0.2 rounded shrink-0">
                                             تأخر صباحي
                                           </span>
-                                          <span className="font-bold text-slate-900 text-[10px] whitespace-nowrap block" title={entry.studentName}>
+                                          <span className="font-bold text-slate-900 text-[10px] truncate block" title={entry.studentName}>
                                             {entry.studentName}
                                           </span>
                                         </div>
                                       ) : entry.isLate ? (
-                                        <div className="flex items-center gap-1">
+                                        <div className="flex items-center gap-1 min-w-0">
                                           <span className="bg-amber-100 text-amber-900 border border-amber-300 text-[8.5px] font-black px-1 py-0.2 rounded shrink-0">
                                             متأخر
                                           </span>
-                                          <span className="font-bold text-slate-900 text-[10px] whitespace-nowrap block" title={entry.studentName}>
+                                          <span className="font-bold text-slate-900 text-[10px] truncate block" title={entry.studentName}>
                                             {entry.studentName}
                                           </span>
                                         </div>
                                       ) : (
-                                        <span className="font-bold text-slate-900 text-[10px] whitespace-nowrap block" title={entry.studentName}>
+                                        <span className="font-bold text-slate-900 text-[10px] truncate block" title={entry.studentName}>
                                           {entry.studentName}
                                         </span>
                                       )}
@@ -2765,7 +2876,7 @@ export default function AdminPanel({
                                     </span>
                                   </td>
                                   <td className="py-1 px-0.5 text-center">
-                                    <span className={`font-extrabold text-[9.5px] w-4.5 h-4.5 rounded flex items-center justify-center border shadow-3xs mx-auto ${getClassBadgeStyles(getClassNum(entry.classCode))}`} title="الصف">
+                                    <span className={`font-extrabold text-[9.5px] w-4.5 h-4.5 rounded flex items-center justify-center border shadow-3xs mx-auto ${getClassBadgeStyles(getClassNum(entry.classCode))}`} title="الفصل">
                                       {getClassNum(entry.classCode)}
                                     </span>
                                   </td>

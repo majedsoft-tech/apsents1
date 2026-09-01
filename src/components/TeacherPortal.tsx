@@ -399,12 +399,16 @@ export default function TeacherPortal({ grades, classes, teachers, students: pro
         }
       });
 
+      const matchedTeacher = teachers.find(t => t.id === selectedTeacherId);
+      const currentTeacherName = matchedTeacher?.name || (selectedTeacherId && !selectedTeacherId.startsWith("tea_") && !selectedTeacherId.startsWith("temp_") ? selectedTeacherId : "") || "معلم الحصة";
+
       await saveAttendanceRecord({
         date: getTodayDateString(),
         period: selectedPeriod,
         gradeId: selectedGradeId,
         classId: selectedClassId,
         teacherId: selectedTeacherId,
+        teacherName: currentTeacherName,
         present: presentIds,
         absent: absentStudentIds,
         late: lateStudentIds,

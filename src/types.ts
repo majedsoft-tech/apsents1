@@ -28,6 +28,7 @@ export interface AttendanceRecord {
   gradeId: string;
   classId: string;
   teacherId: string;
+  teacherName?: string;
   present: string[]; // List of Student IDs
   absent: string[];  // List of Student IDs
   late?: string[];   // List of Student IDs
