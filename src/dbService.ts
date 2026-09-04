@@ -574,13 +574,69 @@ export async function migrateGuestDataToUser(guestUid: string, userUid: string, 
   }
 }
 
-// Helper to fully synchronize all local cached records to Firestore
-export async function syncAllLocalDataToFirestore(): Promise<{ count: number; success: boolean; message: string }> {
+// Test real-time Cloud Firestore connectivity and report precise diagnostic status
+export async function testCloudFirestoreConnection(): Promise<{ ok: boolean; message: string; code?: string }> {
+  try {
+    const testDoc = doc(db, SETTINGS_COLL, "_ping_test");
+    await setDoc(testDoc, { ping: Date.now() }, { merge: true });
+    return { ok: true, message: "الاتصال بقاعدة بيانات Cloud Firestore يعمل بنجاح 100%!" };
+  } catch (err: any) {
+    const msg = err?.message || String(err);
+    const code = err?.code || "";
+    if (msg.includes("does not exist") || msg.includes("NOT_FOUND") || code === "not-found") {
+      return { 
+        ok: false, 
+        code: "DATABASE_NOT_FOUND",
+        message: "قاعدة بيانات Cloud Firestore غير منشأة في مشروع Firebase (apsents1). يرجى فتح Firebase Console والضغط على 'Create database'."
+      };
+    }
+    if (code === "permission-denied" || msg.includes("permission-denied")) {
+      return {
+        ok: false,
+        code: "PERMISSION_DENIED",
+        message: "تم رفض الإذن (Permission Denied) في Firestore. يرجى التأكد من نشر قواعد الأمان firestore.rules."
+      };
+    }
+    return {
+      ok: false,
+      code,
+      message: `تنبيه الاتصال السحابي: ${msg}`
+    };
+  }
+}
+
+// Helper to fully synchronize all local cached records to Firestore with strict diagnostic feedback
+export async function syncAllLocalDataToFirestore(): Promise<{ count: number; success: boolean; message: string; code?: string }> {
   const eff = getEffectiveUidAndEmail();
   const uid = eff.uid;
   const email = eff.email;
   if (!uid && !email) {
     return { count: 0, success: false, message: "يجب تسجيل الدخول أولاً لتتم المزامنة السحابية." };
+  }
+
+  // First verify if the Cloud Firestore database actually exists to prevent misleading success messages
+  try {
+    const pingDoc = doc(db, SETTINGS_COLL, "_sync_connectivity_check");
+    await setDoc(pingDoc, { ping: Date.now(), uid, email }, { merge: true });
+  } catch (connErr: any) {
+    const msg = connErr?.message || String(connErr);
+    const code = connErr?.code || "";
+    if (msg.includes("does not exist") || msg.includes("NOT_FOUND") || code === "not-found") {
+      return {
+        count: 0,
+        success: false,
+        code: "DATABASE_NOT_FOUND",
+        message: "قاعدة بيانات Cloud Firestore لم يتم إنشاؤها بعد في مشروع Firebase (apsents1). يرجى فتح Firebase Console ثم اختيار Firestore Database والضغط على زر Create Database."
+      };
+    }
+    if (code === "permission-denied" || msg.includes("permission-denied")) {
+      return {
+        count: 0,
+        success: false,
+        code: "PERMISSION_DENIED",
+        message: "تم رفض الإذن (Permission Denied) في Firestore. تأكد من نشر قواعد firestore.rules."
+      };
+    }
   }
 
   const collections = [
@@ -594,6 +650,8 @@ export async function syncAllLocalDataToFirestore(): Promise<{ count: number; su
   ];
 
   let totalSynced = 0;
+  let hasWriteError = false;
+  let lastErrorMessage = "";
 
   try {
     for (const colName of collections) {
@@ -636,7 +694,9 @@ export async function syncAllLocalDataToFirestore(): Promise<{ count: number; su
         try {
           await batch.commit();
           totalSynced += chunk.length;
-        } catch (commitErr) {
+        } catch (commitErr: any) {
+          hasWriteError = true;
+          lastErrorMessage = commitErr?.message || String(commitErr);
           console.warn(`Firestore batch commit issue for ${colName}:`, commitErr);
         }
       }
@@ -649,10 +709,139 @@ export async function syncAllLocalDataToFirestore(): Promise<{ count: number; su
       await saveSchoolName(storedName);
     }
 
+    if (hasWriteError && totalSynced === 0) {
+      return {
+        count: 0,
+        success: false,
+        message: `تعذر حفظ البيانات في السحابة: ${lastErrorMessage}`
+      };
+    }
+
     return { count: totalSynced, success: true, message: `تمت المزامنة بنجاح وحفظ ${totalSynced} سجلاً في السحابة.` };
   } catch (err: any) {
     console.error("Error syncing all local data to Firestore:", err);
     return { count: totalSynced, success: false, message: err?.message || "حدث خطأ أثناء المزامنة." };
+  }
+}
+
+/**
+ * Exports all current school data into a single JSON object for immediate backup or transfer
+ */
+export function exportSchoolBackupData(): any {
+  const eff = getEffectiveUidAndEmail();
+  const uid = eff.uid;
+  const email = eff.email;
+
+  const schoolName = (typeof window !== "undefined" 
+    ? (localStorage.getItem(`school_name_${uid}`) || (email ? localStorage.getItem(`school_name_${email}`) : null) || localStorage.getItem("school_name_cached") || localStorage.getItem("school_name_cache"))
+    : "") || "المدرسة";
+
+  const backup = {
+    version: "1.0",
+    exportDate: new Date().toISOString(),
+    schoolName,
+    grades: getLocalItems(GRADES_COLL, uid),
+    classes: getLocalItems(CLASSES_COLL, uid),
+    teachers: getLocalItems(TEACHERS_COLL, uid),
+    students: getLocalItems(STUDENTS_COLL, uid),
+    attendance: getLocalItems(ATTENDANCE_COLL, uid),
+    behaviors: getLocalItems(BEHAVIORS_COLL, uid),
+    morningDelays: getLocalItems(MORNING_DELAYS_COLL, uid)
+  };
+
+  return backup;
+}
+
+/**
+ * Triggers browser download of full school JSON backup file
+ */
+export function downloadSchoolBackupFile(): void {
+  try {
+    const backup = exportSchoolBackupData();
+    const cleanSchoolName = (backup.schoolName || "School").replace(/[\/\\:*?"<>|]/g, "_").trim();
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const fileName = `نسخة_مدرسية_${cleanSchoolName}_${dateStr}.json`;
+
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    console.error("Error downloading backup file:", err);
+  }
+}
+
+/**
+ * Imports full school backup JSON data, restoring local state and syncing to Firestore
+ */
+export async function importSchoolBackupData(backupData: any): Promise<{ success: boolean; message: string; counts: any }> {
+  if (!backupData || typeof backupData !== "object") {
+    return { success: false, message: "ملف النسخة الاحتياطية غير صالح أو تالف.", counts: {} };
+  }
+
+  const eff = getEffectiveUidAndEmail();
+  const uid = eff.uid || "school_admin";
+  const email = eff.email || "majedsoft@gmail.com";
+
+  try {
+    // 1. School Name
+    if (backupData.schoolName) {
+      if (typeof window !== "undefined") {
+        localStorage.setItem("school_name_cached", backupData.schoolName);
+        if (uid) localStorage.setItem(`school_name_${uid}`, backupData.schoolName);
+        if (email) localStorage.setItem(`school_name_${email.toLowerCase()}`, backupData.schoolName);
+      }
+      saveSchoolName(backupData.schoolName).catch(() => {});
+    }
+
+    // 2. Collections restoration
+    const restoredCounts: any = {};
+    const collectionsToRestore: { key: string; colName: string }[] = [
+      { key: "grades", colName: GRADES_COLL },
+      { key: "classes", colName: CLASSES_COLL },
+      { key: "teachers", colName: TEACHERS_COLL },
+      { key: "students", colName: STUDENTS_COLL },
+      { key: "attendance", colName: ATTENDANCE_COLL },
+      { key: "behaviors", colName: BEHAVIORS_COLL },
+      { key: "morningDelays", colName: MORNING_DELAYS_COLL }
+    ];
+
+    for (const item of collectionsToRestore) {
+      const list = Array.isArray(backupData[item.key]) ? backupData[item.key] : [];
+      if (list.length > 0) {
+        // Tag with active user credentials
+        const tagged = list.map((docItem: any) => ({
+          ...docItem,
+          userId: docItem.userId || uid,
+          userEmail: docItem.userEmail || email,
+          updatedAt: Date.now()
+        }));
+
+        setLocalItems(item.colName, tagged, uid);
+        if (email) setLocalItems(item.colName, tagged, email);
+        notifyCollectionSubscribers(item.colName, tagged);
+        restoredCounts[item.key] = tagged.length;
+      } else {
+        restoredCounts[item.key] = 0;
+      }
+    }
+
+    // 3. Trigger cloud sync in background if Firestore is accessible
+    syncAllLocalDataToFirestore().catch(() => {});
+
+    return {
+      success: true,
+      message: "تم استيراد كافة بيانات النسخة الاحتياطية بنجاح!",
+      counts: restoredCounts
+    };
+  } catch (err: any) {
+    console.error("Error importing backup:", err);
+    return { success: false, message: err?.message || "فشل استيراد النسخة الاحتياطية.", counts: {} };
   }
 }
 

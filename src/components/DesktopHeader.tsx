@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useRef } from "react";
 import { 
   Calendar, 
   Clock, 
@@ -8,7 +8,9 @@ import {
   Edit2, 
   Loader2, 
   Cloud,
-  CloudOff
+  CloudOff,
+  Download,
+  Upload
 } from "lucide-react";
 
 interface DesktopHeaderProps {
@@ -27,6 +29,8 @@ interface DesktopHeaderProps {
   onSyncCloudData?: () => Promise<void>;
   isSyncingCloud?: boolean;
   syncCloudSuccess?: boolean;
+  onDownloadBackup?: () => void;
+  onUploadBackup?: (file: File) => void;
 }
 
 export default function DesktopHeader({
@@ -44,8 +48,19 @@ export default function DesktopHeader({
   isStatsOnly = false,
   onSyncCloudData,
   isSyncingCloud = false,
-  syncCloudSuccess = false
+  syncCloudSuccess = false,
+  onDownloadBackup,
+  onUploadBackup
 }: DesktopHeaderProps) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file && onUploadBackup) {
+      onUploadBackup(file);
+    }
+    if (e.target) e.target.value = "";
+  };
   const getTodayArabicDate = () => {
     const d = new Date();
     const weekday = d.toLocaleDateString("ar-SA", { weekday: "long" });
@@ -152,6 +167,41 @@ export default function DesktopHeader({
               </>
             )}
           </button>
+        )}
+
+        {/* Export Backup Button */}
+        {onDownloadBackup && (
+          <button
+            type="button"
+            onClick={onDownloadBackup}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-800 rounded-xl text-xs font-black transition cursor-pointer shadow-3xs"
+            title="تنزيل نسخة احتياطية (ملف JSON) لنقل البيانات بين قوقل استوديو وموقع Vercel"
+          >
+            <Download className="w-3.5 h-3.5 text-emerald-700" />
+            <span>تصدير نسخة</span>
+          </button>
+        )}
+
+        {/* Import Backup Button */}
+        {onUploadBackup && (
+          <>
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 border border-indigo-300 text-indigo-800 rounded-xl text-xs font-black transition cursor-pointer shadow-3xs"
+              title="استيراد وتثبيت نسخة احتياطية سابقة من ملف JSON"
+            >
+              <Upload className="w-3.5 h-3.5 text-indigo-700" />
+              <span>استيراد نسخة</span>
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".json"
+              className="hidden"
+              onChange={handleFileChange}
+            />
+          </>
         )}
 
         {/* Share Modal Trigger (Hidden in stats-only mode) */}

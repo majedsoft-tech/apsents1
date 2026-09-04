@@ -34,7 +34,10 @@ import {
   subscribeToAllMorningDelayRecords,
   purgeAllServerAndTemporaryData,
   purgeDeletedAndOrphanedData,
-  getLocalCollection
+  getLocalCollection,
+  downloadSchoolBackupFile,
+  importSchoolBackupData,
+  testCloudFirestoreConnection
 } from "../dbService";
 import { 
   Lock, 
@@ -58,7 +61,10 @@ import {
   Layers,
   AlertCircle,
   Key,
-  Loader2
+  Loader2,
+  Download,
+  Upload,
+  CloudLightning
 } from "lucide-react";
 
 interface AdminPanelProps {
@@ -593,6 +599,69 @@ export default function AdminPanel({
   const showMessage = (text: string, type: "success" | "error" = "success") => {
     setActionMessage({ type, text });
     setTimeout(() => setActionMessage(null), 4000);
+  };
+
+  const handleBackupFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      const res = await importSchoolBackupData(parsed);
+      if (res.success) {
+        await onRefreshData();
+        setAlertState({
+          title: "تم استيراد النسخة الاحتياطية بنجاح ✅",
+          message: `تمت استعادة بيانات المدرسة بنجاح!\n• الصفوف: ${res.counts.grades || 0}\n• الفصول: ${res.counts.classes || 0}\n• الطلاب: ${res.counts.students || 0}\n• المعلمين: ${res.counts.teachers || 0}\n• سجلات الغياب: ${res.counts.attendance || 0}`,
+          type: "info"
+        });
+      } else {
+        setAlertState({
+          title: "فشل استيراد النسخة الاحتياطية ❌",
+          message: res.message,
+          type: "warning"
+        });
+      }
+    } catch (err: any) {
+      setAlertState({
+        title: "خطأ في قراءة ملف النسخة الاحتياطية ⚠️",
+        message: "الملف المرفق غير صالح أو ليس بصيغة JSON صحيحة: " + (err?.message || err),
+        type: "warning"
+      });
+    } finally {
+      e.target.value = "";
+    }
+  };
+
+  const handleTestCloudConnection = async () => {
+    try {
+      const res = await testCloudFirestoreConnection();
+      if (res.ok) {
+        setAlertState({
+          title: "اتصال السحابة نشط ومكتمل 100% ✅",
+          message: "قاعدة بيانات Cloud Firestore في مشروع Firebase (apsents1) تعمل ومفعلة بنجاح، والمزامنة السحابية الحية تعمل بين جميع الأجهزة بدون أي مشاكل!",
+          type: "info"
+        });
+      } else if (res.code === "DATABASE_NOT_FOUND") {
+        setAlertState({
+          title: "⚠️ تنبيه: قاعدة بيانات Firestore لم تُنشأ بعد",
+          message: "مشروع Firebase تم التعرف عليه (apsents1)، لكن قاعدة بيانات Cloud Firestore غير منشأة داخل المشروع.\n\nخطوات تفعيلها في ثانية:\n1. افتح الرابط: https://console.firebase.google.com/project/apsents1/firestore\n2. اضغط على زر 'Create Database' (إنشاء قاعدة بيانات).\n3. اختر الموقع الجغرافي ووافق على التفعيل.\n\nبديل فوري: يمكنك استخدام أزرار 'تصدير نسخة' و'استيراد نسخة' لنقل كافة البيانات فوراً بين قوقل استوديو وموقع Vercel بدون انتظار!",
+          type: "warning"
+        });
+      } else {
+        setAlertState({
+          title: "تنبيه في الاتصال السحابي ⚠️",
+          message: res.message,
+          type: "warning"
+        });
+      }
+    } catch (e: any) {
+      setAlertState({
+        title: "خطأ في الاتصال",
+        message: e?.message || String(e),
+        type: "warning"
+      });
+    }
   };
 
   const handlePrintSelectedAttendance = () => {
@@ -4484,17 +4553,54 @@ export default function AdminPanel({
                 <h2 className="text-sm font-black text-slate-800">تحديد الصف والفصل الدراسي:</h2>
               </div>
               
-              {/* Orange Button to open School Structure Modal (Grades & Classes management) */}
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedGradeIdForClasses(selectedGradeId);
-                  setShowStructureManager(true);
-                }}
-                className="bg-[#ff9800] hover:bg-[#f57c00] active:bg-amber-700 text-white font-extrabold px-4.5 py-2.5 rounded-xl text-xs flex items-center gap-2 shadow-xs transition-all cursor-pointer"
-              >
-                <span>⚙️ إضافة / تعديل الصفوف والفصول</span>
-              </button>
+              {/* Action Buttons: Grades/Classes Management + Backup Export/Import + Cloud Diagnostics */}
+              <div className="flex items-center gap-2 flex-wrap">
+                {/* Orange Button to open School Structure Modal (Grades & Classes management) */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedGradeIdForClasses(selectedGradeId);
+                    setShowStructureManager(true);
+                  }}
+                  className="bg-[#ff9800] hover:bg-[#f57c00] active:bg-amber-700 text-white font-extrabold px-4.5 py-2.5 rounded-xl text-xs flex items-center gap-2 shadow-xs transition-all cursor-pointer"
+                >
+                  <span>⚙️ إضافة / تعديل الصفوف والفصول</span>
+                </button>
+
+                {/* Export Backup JSON Button */}
+                <button
+                  type="button"
+                  onClick={downloadSchoolBackupFile}
+                  className="bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-extrabold px-3.5 py-2.5 rounded-xl text-xs flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
+                  title="تنزيل نسخة احتياطية كاملة لبيانات المدرسة (ملف JSON) لنقلها فوراً لموقع Vercel أو أي جهاز"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>💾 تصدير نسخة (JSON)</span>
+                </button>
+
+                {/* Import Backup JSON Button */}
+                <label className="bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-extrabold px-3.5 py-2.5 rounded-xl text-xs flex items-center gap-1.5 shadow-xs transition-all cursor-pointer">
+                  <Upload className="w-4 h-4" />
+                  <span>📥 استيراد نسخة (JSON)</span>
+                  <input
+                    type="file"
+                    accept=".json"
+                    className="hidden"
+                    onChange={handleBackupFileChange}
+                  />
+                </label>
+
+                {/* Test Cloud Connection Button */}
+                <button
+                  type="button"
+                  onClick={handleTestCloudConnection}
+                  className="bg-slate-800 hover:bg-slate-900 text-white font-extrabold px-3 py-2.5 rounded-xl text-xs flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
+                  title="فحص الاتصال بقاعدة بيانات Cloud Firestore وحالة المزامنة السحابية"
+                >
+                  <CloudLightning className="w-4 h-4 text-amber-400" />
+                  <span>فحص السحابة</span>
+                </button>
+              </div>
             </div>
 
             {/* Grades Selection Icon Cards */}

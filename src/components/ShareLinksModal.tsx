@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useRef } from "react";
 import { 
   X, 
   Copy, 
@@ -14,7 +14,9 @@ import {
   Loader2,
   ShieldCheck,
   ShieldAlert,
-  Laptop
+  Laptop,
+  Download,
+  Upload
 } from "lucide-react";
 
 interface ShareLinksModalProps {
@@ -34,6 +36,8 @@ interface ShareLinksModalProps {
   syncCloudSuccess?: boolean;
   isGoogleAuthenticated?: boolean;
   onGoogleLogin?: () => void;
+  onDownloadBackup?: () => void;
+  onUploadBackup?: (file: File) => void;
 }
 
 export default function ShareLinksModal({
@@ -52,8 +56,12 @@ export default function ShareLinksModal({
   isSyncingCloud = false,
   syncCloudSuccess = false,
   isGoogleAuthenticated = false,
-  onGoogleLogin
+  onGoogleLogin,
+  onDownloadBackup,
+  onUploadBackup
 }: ShareLinksModalProps) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   if (!isOpen) return null;
 
   return (
@@ -135,6 +143,51 @@ export default function ShareLinksModal({
                 <span>تمت المزامنة السحابية بنجاح! جميع بياناتك محفوظة الآن وجاهزة للعرض على أي جهاز.</span>
               </div>
             )}
+
+            {/* Quick JSON Backup Transfer (Offline/Immediate Cross-Device Migration) */}
+            <div className="pt-2 border-t border-indigo-200/60 space-y-1.5">
+              <p className="text-[11px] font-black text-slate-800">
+                💾 النقل السريع للبيانات بين قوقل استوديو وموقع Vercel (ملف JSON):
+              </p>
+              <div className="flex items-center gap-2">
+                {onDownloadBackup && (
+                  <button
+                    type="button"
+                    onClick={onDownloadBackup}
+                    className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black shadow-xs cursor-pointer transition"
+                    title="تنزيل نسخة احتياطية كاملة لبيانات المدرسة"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>تصدير نسخة (JSON)</span>
+                  </button>
+                )}
+
+                {onUploadBackup && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black shadow-xs cursor-pointer transition"
+                      title="استيراد نسخة احتياطية سابقة وتثبيتها"
+                    >
+                      <Upload className="w-4 h-4" />
+                      <span>استيراد نسخة (JSON)</span>
+                    </button>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept=".json"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file && onUploadBackup) onUploadBackup(file);
+                        if (e.target) e.target.value = "";
+                      }}
+                    />
+                  </>
+                )}
+              </div>
+            </div>
           </div>
 
           <p className="text-xs text-slate-700 font-bold leading-relaxed pt-1">

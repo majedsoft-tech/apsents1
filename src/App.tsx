@@ -22,7 +22,10 @@ import {
   resolveOwnerProfileFromDb,
   getOrCreateOwnSchoolAdminId,
   setLinkedSchoolOwnerId,
-  restoreGradeDefaultClasses
+  restoreGradeDefaultClasses,
+  downloadSchoolBackupFile,
+  importSchoolBackupData,
+  testCloudFirestoreConnection
 } from "./dbService";
 import { Grade, Class, Teacher, Student } from "./types";
 import TeacherPortal from "./components/TeacherPortal";
@@ -67,7 +70,9 @@ import {
   Link2,
   Share2,
   Sparkles,
-  HelpCircle
+  HelpCircle,
+  Download,
+  Upload
 } from "lucide-react";
 
 function getInitialMode(): "teacher" | "admin" | "stats-only" | "super-admin" | "morning-delay" {
@@ -143,6 +148,12 @@ export default function App() {
   const [adminSyncCopied, setAdminSyncCopied] = useState<boolean>(false);
   const [schoolCodeCopied, setSchoolCodeCopied] = useState<boolean>(false);
   const [isLinkingLoading, setIsLinkingLoading] = useState<boolean>(false);
+  const [firestoreNeedsCreation, setFirestoreNeedsCreation] = useState<boolean>(false);
+  const [backupFeedbackModal, setBackupFeedbackModal] = useState<{
+    title: string;
+    message: string;
+    type?: "success" | "error" | "warning";
+  } | null>(null);
 
   // Global Operation Progress State (Saves/Loads/Deletes across the app)
   const [globalProgress, setGlobalProgress] = useState<{
@@ -595,14 +606,62 @@ export default function App() {
     setIsSyncingCloud(true);
     setSyncCloudSuccess(false);
     try {
-      await syncAllLocalDataToFirestore();
-      await handleRefreshData();
-      setSyncCloudSuccess(true);
-      setTimeout(() => setSyncCloudSuccess(false), 4000);
-    } catch (err) {
+      const res = await syncAllLocalDataToFirestore();
+      if (res.success) {
+        await handleRefreshData();
+        setSyncCloudSuccess(true);
+        setTimeout(() => setSyncCloudSuccess(false), 4000);
+      } else {
+        if (res.code === "DATABASE_NOT_FOUND") {
+          setFirestoreNeedsCreation(true);
+        } else {
+          setBackupFeedbackModal({
+            title: "تنبيه المزامنة السحابية ⚠️",
+            message: res.message,
+            type: "warning"
+          });
+        }
+      }
+    } catch (err: any) {
       console.error("Error syncing data with cloud:", err);
+      setBackupFeedbackModal({
+        title: "خطأ في الاتصال ❌",
+        message: err?.message || "حدث خطأ أثناء المزامنة السحابية",
+        type: "error"
+      });
     } finally {
       setIsSyncingCloud(false);
+    }
+  };
+
+  const handleUploadBackup = async (file: File) => {
+    try {
+      setGlobalProgress({ active: true, type: "import", label: "جاري استيراد وتثبيت النسخة الاحتياطية..." });
+      const text = await file.text();
+      const json = JSON.parse(text);
+      const res = await importSchoolBackupData(json);
+      if (res.success) {
+        await handleRefreshData();
+        setBackupFeedbackModal({
+          title: "تم استيراد النسخة الاحتياطية بنجاح ✅",
+          message: `تمت استعادة كافة بيانات المدرسة بنجاح!\n• الصفوف: ${res.counts.grades || 0}\n• الفصول: ${res.counts.classes || 0}\n• الطلاب: ${res.counts.students || 0}\n• المعلمين: ${res.counts.teachers || 0}\n• سجلات الغياب: ${res.counts.attendance || 0}`,
+          type: "success"
+        });
+      } else {
+        setBackupFeedbackModal({
+          title: "فشل استيراد النسخة الاحتياطية ❌",
+          message: res.message,
+          type: "error"
+        });
+      }
+    } catch (e: any) {
+      setBackupFeedbackModal({
+        title: "خطأ في قراءة ملف النسخة الاحتياطية ⚠️",
+        message: "الملف المرفق غير صالح أو ليس بتنسيق JSON صحيح: " + (e?.message || e),
+        type: "error"
+      });
+    } finally {
+      setGlobalProgress({ active: false, type: null, label: "" });
     }
   };
 
@@ -1551,6 +1610,8 @@ export default function App() {
             onSyncCloudData={handleSyncCloudData}
             isSyncingCloud={isSyncingCloud}
             syncCloudSuccess={syncCloudSuccess}
+            onDownloadBackup={downloadSchoolBackupFile}
+            onUploadBackup={handleUploadBackup}
           />
         )}
 
@@ -1762,6 +1823,8 @@ export default function App() {
         syncCloudSuccess={syncCloudSuccess}
         isGoogleAuthenticated={!!currentUser && !currentUser.isGuest}
         onGoogleLogin={handleGoogleLogin}
+        onDownloadBackup={downloadSchoolBackupFile}
+        onUploadBackup={handleUploadBackup}
       />
 
       {/* School Name Edit Modal */}
@@ -1934,6 +1997,114 @@ export default function App() {
                 حسناً، فهمت
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Firestore Setup Guide Modal */}
+      {firestoreNeedsCreation && (
+        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200" dir="rtl">
+          <div className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-7 max-w-lg w-full text-right space-y-5 shadow-2xl relative">
+            <div className="flex items-center gap-3 border-b border-slate-100 pb-3">
+              <div className="w-10 h-10 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center text-amber-600 shadow-3xs flex-shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-black text-slate-900">تفعيل قاعدة بيانات Cloud Firestore</h3>
+                <p className="text-[11px] text-slate-500 font-bold">مطلوب ضغطة واحدة لإنشاء قاعدة البيانات في مشروع Firebase</p>
+              </div>
+            </div>
+
+            <div className="text-xs text-slate-700 font-medium space-y-3 leading-relaxed">
+              <p className="font-bold text-slate-800">
+                مشروع Firebase تم ربطه بنجاح (<span className="text-indigo-600 font-mono font-black" dir="ltr">apsents1</span>)، ولكن قاعدة بيانات Cloud Firestore لم يتم إنشاؤها بعد داخل حسابك في Firebase.
+              </p>
+
+              <div className="bg-amber-50/70 border border-amber-200 rounded-2xl p-3.5 space-y-2">
+                <h4 className="font-black text-amber-900 text-xs flex items-center gap-1.5">
+                  <span>🛠️ خطوات التفعيل السريع (أقل من دقيقة):</span>
+                </h4>
+                <ol className="list-decimal list-inside space-y-1.5 text-[11px] text-amber-950 font-bold pr-1">
+                  <li>افتح رابط Firestore في كونسول Google Firebase:</li>
+                  <div className="pt-1 pb-1">
+                    <a
+                      href="https://console.firebase.google.com/project/apsents1/firestore"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black shadow-xs"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                      <span>فتح Firebase Console لمشروع apsents1</span>
+                    </a>
+                  </div>
+                  <li>اضغط على زر <strong>"Create Database"</strong> (إنشاء قاعدة بيانات).</li>
+                  <li>اختر الموقع الجغرافي الافتراضي (مثل <strong>eur3</strong> أو <strong>nam5</strong>).</li>
+                  <li>اختر <strong>Start in production mode</strong> ثم اضغط <strong>Create / Enable</strong>.</li>
+                </ol>
+              </div>
+
+              <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-3 space-y-1.5 text-emerald-950">
+                <div className="flex items-center gap-1.5 font-black text-xs text-emerald-900">
+                  <Check className="w-4 h-4 text-emerald-600" />
+                  <span>حل فوري بديل لنقل البيانات الآن (بدون انتظار):</span>
+                </div>
+                <p className="text-[11px] font-bold text-emerald-900 leading-normal">
+                  يمكنك استخدام زر <strong>«💾 تصدير نسخة (JSON)»</strong> لتحميل بياناتك كاملة فوراً، ثم فتح <strong>apsents.vercel.app</strong> والضغط على <strong>«📥 استيراد نسخة»</strong> لتظهر جميع الفصول والصفوف والطلاب والغياب فوراً!
+                </p>
+                <div className="flex items-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={downloadSchoolBackupFile}
+                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer shadow-3xs"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>تنزيل ملف النسخة الاحتياطية (JSON)</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setFirestoreNeedsCreation(false)}
+                className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold text-xs cursor-pointer"
+              >
+                إغلاق
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Backup / Restore Feedback Modal */}
+      {backupFeedbackModal && (
+        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200" dir="rtl">
+          <div className="bg-white border border-slate-200 rounded-3xl p-6 max-w-sm w-full text-right space-y-4 shadow-2xl animate-in zoom-in-95">
+            <div className="flex items-center gap-3 border-b border-slate-100 pb-3">
+              <div className={`w-9 h-9 rounded-2xl flex items-center justify-center font-bold shadow-3xs ${
+                backupFeedbackModal.type === "success"
+                  ? "bg-emerald-50 text-emerald-600 border border-emerald-200"
+                  : backupFeedbackModal.type === "warning"
+                  ? "bg-amber-50 text-amber-600 border border-amber-200"
+                  : "bg-red-50 text-red-600 border border-red-200"
+              }`}>
+                {backupFeedbackModal.type === "success" ? <Check className="w-5 h-5" /> : <AlertTriangle className="w-5 h-5" />}
+              </div>
+              <h3 className="text-sm font-black text-slate-900">{backupFeedbackModal.title}</h3>
+            </div>
+
+            <p className="text-xs text-slate-700 font-bold whitespace-pre-line leading-relaxed">
+              {backupFeedbackModal.message}
+            </p>
+
+            <button
+              type="button"
+              onClick={() => setBackupFeedbackModal(null)}
+              className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold text-xs cursor-pointer"
+            >
+              حسناً
+            </button>
           </div>
         </div>
       )}
