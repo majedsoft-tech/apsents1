@@ -139,9 +139,18 @@ const getClassCode = (clsName: string) => {
 
 const getPeriodNum = (code: string) => {
   if (!code) return "1";
-  if (code === "صباحي" || code === "ص" || code === "طابور") return "صباحي";
+  if (code === "صباحي" || code === "ص" || code === "طابور" || code.includes("صباح")) return "صباحي";
   const match = code.match(/\d+/);
-  return match ? match[0] : code;
+  if (match) return match[0];
+  const norm = normalizeArabic(code);
+  if (norm.includes("اول") || norm.includes("1")) return "1";
+  if (norm.includes("ثاني") || norm.includes("2")) return "2";
+  if (norm.includes("ثالث") || norm.includes("3")) return "3";
+  if (norm.includes("رابع") || norm.includes("4")) return "4";
+  if (norm.includes("خامس") || norm.includes("5")) return "5";
+  if (norm.includes("سادس") || norm.includes("6")) return "6";
+  if (norm.includes("سابع") || norm.includes("7")) return "7";
+  return code;
 };
 
 const getClassNum = (code: string) => {
@@ -1134,13 +1143,27 @@ export default function AdminPanel({
 
       // Group attendance into columns
       const PERIOD_TIMES: Record<string, string> = {
+        "1": "08:00",
+        "2": "08:45",
+        "3": "09:30",
+        "4": "10:30",
+        "5": "11:15",
+        "6": "12:00",
+        "7": "12:45",
         "الأولى": "08:00",
         "الثانية": "08:45",
         "الثالثة": "09:30",
         "الرابعة": "10:30",
         "الخامسة": "11:15",
         "السادسة": "12:00",
-        "السابعة": "12:45"
+        "السابعة": "12:45",
+        "حصة 1": "08:00",
+        "حصة 2": "08:45",
+        "حصة 3": "09:30",
+        "حصة 4": "10:30",
+        "حصة 5": "11:15",
+        "حصة 6": "12:00",
+        "حصة 7": "12:45"
       };
 
       const PERIOD_CODES: Record<string, string> = {
@@ -1150,11 +1173,30 @@ export default function AdminPanel({
         "الرابعة": "ح4",
         "الخامسة": "ح5",
         "السادسة": "ح6",
-        "السابعة": "ح7"
+        "السابعة": "ح7",
+        "حصة 1": "ح1",
+        "حصة 2": "ح2",
+        "حصة 3": "ح3",
+        "حصة 4": "ح4",
+        "حصة 5": "ح5",
+        "حصة 6": "ح6",
+        "حصة 7": "ح7"
       };
 
-      const getPeriodCode = (p: string) => PERIOD_CODES[p] || p;
-      const getPeriodTime = (p: string) => PERIOD_TIMES[p] || "08:00";
+      const getPeriodCode = (p: string) => {
+        if (!p) return "ح1";
+        if (PERIOD_CODES[p]) return PERIOD_CODES[p];
+        const num = getPeriodNum(p);
+        if (num && num !== "صباحي" && !isNaN(parseInt(num, 10))) return `ح${num}`;
+        return p;
+      };
+
+      const getPeriodTime = (p: string) => {
+        if (PERIOD_TIMES[p]) return PERIOD_TIMES[p];
+        const num = getPeriodNum(p);
+        if (PERIOD_TIMES[num]) return PERIOD_TIMES[num];
+        return "08:00";
+      };
 
       const g1Entries: any[] = [];
       const g2Entries: any[] = [];
@@ -1522,10 +1564,10 @@ export default function AdminPanel({
             return classA - classB;
           }
 
-          const pNumAStr = getPeriodNum(a.periodCode || "");
-          const pNumBStr = getPeriodNum(b.periodCode || "");
-          let periodA = parseInt(pNumAStr, 10);
-          let periodB = parseInt(pNumBStr, 10);
+          const pNumAStr = getPeriodNum(a.periodCode || a.period || "");
+          const pNumBStr = getPeriodNum(b.periodCode || b.period || "");
+          let periodA = (pNumAStr === "صباحي" || pNumAStr === "ص" || pNumAStr === "طابور" || a.isMorningDelay) ? 0 : parseInt(pNumAStr, 10);
+          let periodB = (pNumBStr === "صباحي" || pNumBStr === "ص" || pNumBStr === "طابور" || b.isMorningDelay) ? 0 : parseInt(pNumBStr, 10);
           if (isNaN(periodA)) periodA = 999;
           if (isNaN(periodB)) periodB = 999;
 

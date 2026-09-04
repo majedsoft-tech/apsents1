@@ -352,17 +352,6 @@ export default function App() {
   };
 
   useEffect(() => {
-    const isDirectPortal = isDirectTeacherLink || isDirectMorningDelayLink || appMode === "teacher" || appMode === "morning-delay" || appMode === "stats-only";
-    if (!currentUser && !isDirectPortal) {
-      setGrades([]);
-      setClasses([]);
-      setTeachers([]);
-      setStudents([]);
-      setSchoolName("");
-      setLoading(false);
-      return;
-    }
-
     // Pre-populate with local cached items for 0ms instant display while live sync connects
     const localGrades = getLocalCollection<Grade>("grades");
     const localClasses = getLocalCollection<Class>("classes");
@@ -394,7 +383,8 @@ export default function App() {
       unsubSchool = subscribeToSchoolName((newName) => {
         if (newName) {
           setSchoolName(newName);
-          if (currentUser.email) {
+          localStorage.setItem("school_name_cached", newName);
+          if (currentUser?.email) {
             localStorage.setItem(`school_name_${currentUser.email.toLowerCase()}`, newName);
           }
         } else {
