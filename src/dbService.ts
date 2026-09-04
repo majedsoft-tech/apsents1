@@ -15,7 +15,15 @@ import {
   disableNetwork,
   enableNetwork
 } from "firebase/firestore";
-import { db, auth as firebaseAuth } from "./firebase";
+import { 
+  db, 
+  auth as firebaseAuth, 
+  getActiveFirestoreDatabaseId, 
+  setActiveFirestoreDatabaseId, 
+  getDbForDatabaseId 
+} from "./firebase";
+export { getActiveFirestoreDatabaseId, setActiveFirestoreDatabaseId, getDbForDatabaseId };
+
 import { Grade, Class, Teacher, Student, AttendanceRecord, BehaviorRecord, MorningDelayRecord, RegisteredUser } from "./types";
 
 // Active user proxy for unauthenticated direct links
@@ -574,29 +582,122 @@ export async function migrateGuestDataToUser(guestUid: string, userUid: string, 
   }
 }
 
+// Switch Database ID and reload app safely
+export function switchDatabaseIdAndReload(newId: string): void {
+  setActiveFirestoreDatabaseId(newId);
+  if (typeof window !== "undefined") {
+    window.location.reload();
+  }
+}
+
+export interface CloudDiagnosticDetails {
+  ok: boolean;
+  activeDbId: string;
+  defaultDbResult: { ok: boolean; code?: string; message: string };
+  projectNamedDbResult?: { ok: boolean; code?: string; message: string };
+  customDbResult?: { ok: boolean; code?: string; message: string };
+  suggestedDbId?: string;
+  isRulesIssue?: boolean;
+  isNotFoundIssue?: boolean;
+  message: string;
+}
+
+// Run deep, intelligent multi-database diagnostics
+export async function runComprehensiveCloudDiagnostics(customIdToTest?: string): Promise<CloudDiagnosticDetails> {
+  const activeId = getActiveFirestoreDatabaseId();
+  
+  // Test helper against specific database instance
+  const testSpecificDb = async (dbId: string) => {
+    try {
+      const testDbInstance = getDbForDatabaseId(dbId);
+      const testDoc = doc(testDbInstance, SETTINGS_COLL, "_ping_test");
+      await setDoc(testDoc, { ping: Date.now(), databaseId: dbId }, { merge: true });
+      return { ok: true, message: "تم الاتصال والكتابة بنجاح!" };
+    } catch (err: any) {
+      const msg = err?.message || String(err);
+      const code = err?.code || "";
+      return { ok: false, code, message: msg };
+    }
+  };
+
+  // 1. Test "(default)"
+  const defaultRes = await testSpecificDb("(default)");
+
+  // 2. Test project-named database "apsents1"
+  const projectNamedRes = await testSpecificDb("apsents1");
+
+  // 3. Test customId if provided and not equal to (default) or apsents1
+  let customRes: { ok: boolean; code?: string; message: string } | undefined;
+  if (customIdToTest && customIdToTest !== "(default)" && customIdToTest !== "apsents1") {
+    customRes = await testSpecificDb(customIdToTest);
+  }
+
+  let ok = false;
+  let suggestedDbId: string | undefined;
+  let isRulesIssue = false;
+  let isNotFoundIssue = false;
+  let summaryMessage = "";
+
+  // Analyze active database result
+  const activeRes = activeId === "apsents1" 
+    ? projectNamedRes 
+    : (customRes && activeId === customIdToTest ? customRes : defaultRes);
+
+  if (activeRes.ok) {
+    ok = true;
+    summaryMessage = `الاتصال بقاعدة البيانات النشطة (${activeId}) يعمل بنجاح 100%!`;
+  } else {
+    // Check if another database succeeded
+    if (projectNamedRes.ok && activeId !== "apsents1") {
+      suggestedDbId = "apsents1";
+      summaryMessage = `تم العثور على قاعدة بيانات باسم المشروع (apsents1) وهي تعمل بنجاح! يمكنك تفعيلها بنقرة واحدة.`;
+    } else if (defaultRes.ok && activeId !== "(default)") {
+      suggestedDbId = "(default)";
+      summaryMessage = `قاعدة البيانات الافتراضية (default) تعمل بنجاح! يمكنك تفعيلها بنقرة واحدة.`;
+    } else if (customRes && customRes.ok) {
+      suggestedDbId = customIdToTest;
+      summaryMessage = `قاعدة البيانات المخصصة (${customIdToTest}) تعمل بنجاح!`;
+    } else {
+      // Both failed, identify exact cause
+      const errStr = ((activeRes.message || "") + " " + (activeRes.code || "")).toLowerCase();
+      if (errStr.includes("permission-denied") || activeRes.code === "permission-denied") {
+        isRulesIssue = true;
+        summaryMessage = `قاعدة البيانات موجودة، ولكن المشكلة في «قواعد الأمان» (Rules) حيث تم حظر القراءة والكتابة.\nالحل: فتح تبويب Rules في Firebase واستبدال القواعد للسماح بالوصول (allow read, write: if true;).`;
+      } else if (errStr.includes("does not exist") || errStr.includes("not_found") || activeRes.code === "not-found") {
+        isNotFoundIssue = true;
+        summaryMessage = `قاعدة بيانات Cloud Firestore غير منشأة بعد في حساب Firebase بالاسم (${activeId}).\nالحل: فتح Firebase Console ثم الضغط على Create Database بالوضع الأصلي Native Mode.`;
+      } else {
+        summaryMessage = `تنبيه الاتصال السحابي: ${activeRes.message || activeRes.code}`;
+      }
+    }
+  }
+
+  return {
+    ok,
+    activeDbId: activeId,
+    defaultDbResult: defaultRes,
+    projectNamedDbResult: projectNamedRes,
+    customDbResult: customRes,
+    suggestedDbId,
+    isRulesIssue,
+    isNotFoundIssue,
+    message: summaryMessage
+  };
+}
+
 // Test real-time Cloud Firestore connectivity and report precise diagnostic status
-export async function testCloudFirestoreConnection(): Promise<{ ok: boolean; message: string; code?: string }> {
+export async function testCloudFirestoreConnection(): Promise<{ ok: boolean; message: string; code?: string; details?: CloudDiagnosticDetails }> {
   try {
-    const testDoc = doc(db, SETTINGS_COLL, "_ping_test");
-    await setDoc(testDoc, { ping: Date.now() }, { merge: true });
-    return { ok: true, message: "الاتصال بقاعدة بيانات Cloud Firestore يعمل بنجاح 100%!" };
+    const diag = await runComprehensiveCloudDiagnostics();
+    return {
+      ok: diag.ok,
+      message: diag.message,
+      code: diag.isRulesIssue ? "PERMISSION_DENIED" : (diag.isNotFoundIssue ? "DATABASE_NOT_FOUND" : undefined),
+      details: diag
+    };
   } catch (err: any) {
     const msg = err?.message || String(err);
     const code = err?.code || "";
-    if (msg.includes("does not exist") || msg.includes("NOT_FOUND") || code === "not-found") {
-      return { 
-        ok: false, 
-        code: "DATABASE_NOT_FOUND",
-        message: "قاعدة بيانات Cloud Firestore غير منشأة في مشروع Firebase (apsents1). يرجى فتح Firebase Console والضغط على 'Create database'."
-      };
-    }
-    if (code === "permission-denied" || msg.includes("permission-denied")) {
-      return {
-        ok: false,
-        code: "PERMISSION_DENIED",
-        message: "تم رفض الإذن (Permission Denied) في Firestore. يرجى التأكد من نشر قواعد الأمان firestore.rules."
-      };
-    }
     return {
       ok: false,
       code,
@@ -634,9 +735,15 @@ export async function syncAllLocalDataToFirestore(): Promise<{ count: number; su
         count: 0,
         success: false,
         code: "PERMISSION_DENIED",
-        message: "تم رفض الإذن (Permission Denied) في Firestore. تأكد من نشر قواعد firestore.rules."
+        message: "تم رفض الإذن (Permission Denied) في Firestore. تأكد من نشر قواعد firestore.rules بالسماح بالقراءة والكتابة."
       };
     }
+    return {
+      count: 0,
+      success: false,
+      code,
+      message: `خطأ أثناء الاتصال بقاعدة البيانات السحابية: ${msg}`
+    };
   }
 
   const collections = [

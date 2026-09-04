@@ -37,8 +37,10 @@ import {
   getLocalCollection,
   downloadSchoolBackupFile,
   importSchoolBackupData,
-  testCloudFirestoreConnection
+  testCloudFirestoreConnection,
+  syncAllLocalDataToFirestore
 } from "../dbService";
+import { FirebaseDiagnosticModal } from "./FirebaseDiagnosticModal";
 import { 
   Lock, 
   Unlock, 
@@ -287,6 +289,8 @@ export default function AdminPanel({
   const [delaySearchFilter, setDelaySearchFilter] = useState<string>("");
   const [delayGradeFilter, setDelayGradeFilter] = useState<string>("all");
   const [delayClassFilter, setDelayClassFilter] = useState<string>("all");
+
+  const [showFirebaseDiagModal, setShowFirebaseDiagModal] = useState<boolean>(false);
 
   const getStoredSeenBehaviorIds = (): Set<string> => {
     try {
@@ -633,35 +637,8 @@ export default function AdminPanel({
     }
   };
 
-  const handleTestCloudConnection = async () => {
-    try {
-      const res = await testCloudFirestoreConnection();
-      if (res.ok) {
-        setAlertState({
-          title: "اتصال السحابة نشط ومكتمل 100% ✅",
-          message: "قاعدة بيانات Cloud Firestore في مشروع Firebase (apsents1) تعمل ومفعلة بنجاح، والمزامنة السحابية الحية تعمل بين جميع الأجهزة بدون أي مشاكل!",
-          type: "info"
-        });
-      } else if (res.code === "DATABASE_NOT_FOUND") {
-        setAlertState({
-          title: "⚠️ تنبيه: قاعدة بيانات Firestore لم تُنشأ بعد",
-          message: "مشروع Firebase تم التعرف عليه (apsents1)، لكن قاعدة بيانات Cloud Firestore غير منشأة داخل المشروع.\n\nخطوات تفعيلها في ثانية:\n1. افتح الرابط: https://console.firebase.google.com/project/apsents1/firestore\n2. اضغط على زر 'Create Database' (إنشاء قاعدة بيانات).\n3. اختر الموقع الجغرافي ووافق على التفعيل.\n\nبديل فوري: يمكنك استخدام أزرار 'تصدير نسخة' و'استيراد نسخة' لنقل كافة البيانات فوراً بين قوقل استوديو وموقع Vercel بدون انتظار!",
-          type: "warning"
-        });
-      } else {
-        setAlertState({
-          title: "تنبيه في الاتصال السحابي ⚠️",
-          message: res.message,
-          type: "warning"
-        });
-      }
-    } catch (e: any) {
-      setAlertState({
-        title: "خطأ في الاتصال",
-        message: e?.message || String(e),
-        type: "warning"
-      });
-    }
+  const handleTestCloudConnection = () => {
+    setShowFirebaseDiagModal(true);
   };
 
   const handlePrintSelectedAttendance = () => {
@@ -5374,6 +5351,16 @@ export default function AdminPanel({
           </div>
         </div>
       )}
+      {/* Firebase Cloud Diagnostics & Properties Modal */}
+      <FirebaseDiagnosticModal
+        isOpen={showFirebaseDiagModal}
+        onClose={() => setShowFirebaseDiagModal(false)}
+        onTriggerSync={() => {
+          syncAllLocalDataToFirestore().then(() => {
+            if (onRefreshData) onRefreshData();
+          });
+        }}
+      />
     </div>
   );
 }

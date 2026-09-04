@@ -38,6 +38,7 @@ interface ShareLinksModalProps {
   onGoogleLogin?: () => void;
   onDownloadBackup?: () => void;
   onUploadBackup?: (file: File) => void;
+  onOpenCloudDiagnostics?: () => void;
 }
 
 export default function ShareLinksModal({
@@ -58,7 +59,8 @@ export default function ShareLinksModal({
   isGoogleAuthenticated = false,
   onGoogleLogin,
   onDownloadBackup,
-  onUploadBackup
+  onUploadBackup,
+  onOpenCloudDiagnostics
 }: ShareLinksModalProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -134,6 +136,17 @@ export default function ShareLinksModal({
                     <span>⚡ مزامنة ورفع البيانات إلى السحابة فوراً</span>
                   </>
                 )}
+              </button>
+            )}
+
+            {onOpenCloudDiagnostics && (
+              <button
+                type="button"
+                onClick={onOpenCloudDiagnostics}
+                className="w-full flex items-center justify-center gap-1.5 px-3 py-2 bg-white/90 hover:bg-white text-indigo-900 rounded-xl text-xs font-black transition border border-indigo-200 shadow-3xs cursor-pointer"
+              >
+                <CloudLightning className="w-3.5 h-3.5 text-amber-500" />
+                <span>فحص خصائص وتشخيص قاعدة البيانات السحابية</span>
               </button>
             )}
 

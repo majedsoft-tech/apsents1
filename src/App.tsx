@@ -37,6 +37,7 @@ import MobileBottomNav from "./components/MobileBottomNav";
 import MobileDrawer from "./components/MobileDrawer";
 import DesktopHeader from "./components/DesktopHeader";
 import ShareLinksModal from "./components/ShareLinksModal";
+import { FirebaseDiagnosticModal } from "./components/FirebaseDiagnosticModal";
 import { useDevice } from "./hooks/useDevice";
 import { onAuthStateChanged, signInWithPopup, signOut } from "firebase/auth";
 import { auth, googleProvider } from "./firebase";
@@ -239,6 +240,7 @@ export default function App() {
   const [morningDelayCopied, setMorningDelayCopied] = useState<boolean>(false);
   const [isSyncingCloud, setIsSyncingCloud] = useState<boolean>(false);
   const [syncCloudSuccess, setSyncCloudSuccess] = useState<boolean>(false);
+  const [isFirebaseDiagModalOpen, setIsFirebaseDiagModalOpen] = useState<boolean>(false);
   const [teacherTab, setTeacherTab] = useState<"attendance" | "behavior">(getInitialTeacherTab());
   const [adminTab, setAdminTab] = useState<"stats" | "grades" | "teachers" | "students">(getInitialAdminTab());
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState<boolean>(false);
@@ -612,8 +614,8 @@ export default function App() {
         setSyncCloudSuccess(true);
         setTimeout(() => setSyncCloudSuccess(false), 4000);
       } else {
-        if (res.code === "DATABASE_NOT_FOUND") {
-          setFirestoreNeedsCreation(true);
+        if (res.code === "DATABASE_NOT_FOUND" || res.code === "PERMISSION_DENIED") {
+          setIsFirebaseDiagModalOpen(true);
         } else {
           setBackupFeedbackModal({
             title: "تنبيه المزامنة السحابية ⚠️",
@@ -1825,6 +1827,14 @@ export default function App() {
         onGoogleLogin={handleGoogleLogin}
         onDownloadBackup={downloadSchoolBackupFile}
         onUploadBackup={handleUploadBackup}
+        onOpenCloudDiagnostics={() => setIsFirebaseDiagModalOpen(true)}
+      />
+
+      {/* Cloud Diagnostics & Database Properties Modal */}
+      <FirebaseDiagnosticModal
+        isOpen={isFirebaseDiagModalOpen}
+        onClose={() => setIsFirebaseDiagModalOpen(false)}
+        onTriggerSync={handleSyncCloudData}
       />
 
       {/* School Name Edit Modal */}
