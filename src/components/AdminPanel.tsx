@@ -278,6 +278,7 @@ export default function AdminPanel({
 
   const [activeStatsTab, setActiveStatsTab] = useState<"attendance" | "morning_delay" | "selected_attendance" | "student_report">("attendance");
   const [attendanceViewMode, setAttendanceViewMode] = useState<"list" | "grid">("list");
+  const [attendanceGroupMode, setAttendanceGroupMode] = useState<"all" | "unique">("unique");
   const [hasNewBehavior, setHasNewBehavior] = useState<boolean>(false);
   const [newBehaviorIds, setNewBehaviorIds] = useState<string[]>([]);
   const [behaviorSearchFilter, setBehaviorSearchFilter] = useState<string>("");
@@ -2759,7 +2760,7 @@ export default function AdminPanel({
                 <span>التاخر الصباحي</span>
                 {morningDelaysList.length > 0 && (
                   <span className="bg-amber-100 text-amber-800 text-[9px] font-black px-1.5 py-0.2 rounded-full border border-amber-200">
-                    {morningDelaysList.filter(d => d.date === (delayDateFilter || getTodayDateString())).length}
+                    {morningDelaysList.filter(d => d.date === (delayDateFilter === "all" ? d.date : (delayDateFilter || getTodayDateString()))).length}
                   </span>
                 )}
               </button>
@@ -2789,8 +2790,36 @@ export default function AdminPanel({
               </button>
             </div>
 
-            {/* Actions: Print Action */}
+            {/* Actions: Grouping Toggle & Print Action */}
             <div className="flex items-center gap-2">
+              {activeStatsTab === "attendance" && (
+                <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200">
+                  <button
+                    type="button"
+                    onClick={() => setAttendanceGroupMode("unique")}
+                    className={`px-2.5 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer ${
+                      attendanceGroupMode === "unique"
+                        ? "bg-white text-blue-800 shadow-3xs border border-slate-200/60"
+                        : "text-slate-600 hover:text-slate-900"
+                    }`}
+                    title="عرض اسم كل طالب مرة واحدة فقط مع دمج الحصص المسجلة عليه"
+                  >
+                    بدون تكرار الأسماء
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAttendanceGroupMode("all")}
+                    className={`px-2.5 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer ${
+                      attendanceGroupMode === "all"
+                        ? "bg-white text-blue-800 shadow-3xs border border-slate-200/60"
+                        : "text-slate-600 hover:text-slate-900"
+                    }`}
+                    title="عرض كل التسجيلات بالتفصيل لكل حصة"
+                  >
+                    عرض كل الحصص
+                  </button>
+                </div>
+              )}
 
               <button
                 type="button"
@@ -2831,10 +2860,53 @@ export default function AdminPanel({
           {activeStatsTab === "attendance" && (
             <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4 items-start animate-fadeIn">
               {grades.map(grade => {
-                const gradeEntries = todayStats.entriesByGrade[grade.id] || [];
+                const allGradeEntries = todayStats.entriesByGrade[grade.id] || [];
+                // Exclude morning delay entries from the attendance tab (only show classroom absences and class lates)
+                const rawGradeEntries = allGradeEntries.filter((e: any) => !e.isMorningDelay);
+                
+                // Group by student if attendanceGroupMode === "unique" to prevent name repetition
+                let displayEntries: any[] = [];
+                if (attendanceGroupMode === "all") {
+                  displayEntries = rawGradeEntries;
+                } else {
+                  const studentMap = new Map<string, any>();
+                  rawGradeEntries.forEach((entry: any) => {
+                    // Always show dummy no-absence as is
+                    if (entry.isNoAbsenceDummy) {
+                      displayEntries.push(entry);
+                      return;
+                    }
+                    const sId = entry.studentId || entry.studentName;
+                    if (!studentMap.has(sId)) {
+                      studentMap.set(sId, {
+                        ...entry,
+                        allPeriodCodes: [entry.periodCode],
+                        allTeachers: [entry.teacherName],
+                        recordIds: [entry.recordId],
+                        occurrences: 1
+                      });
+                    } else {
+                      const existing = studentMap.get(sId);
+                      if (entry.periodCode && !existing.allPeriodCodes.includes(entry.periodCode)) {
+                        existing.allPeriodCodes.push(entry.periodCode);
+                      }
+                      if (entry.teacherName && !existing.allTeachers.includes(entry.teacherName)) {
+                        existing.allTeachers.push(entry.teacherName);
+                      }
+                      if (entry.recordId && !existing.recordIds.includes(entry.recordId)) {
+                        existing.recordIds.push(entry.recordId);
+                      }
+                      existing.occurrences += 1;
+                      if (entry.isAbsent) existing.isAbsent = true;
+                    }
+                  });
+                  displayEntries = [...displayEntries, ...Array.from(studentMap.values())];
+                }
+
                 const gradeClasses = classes.filter(c => c.gradeId === grade.id);
-                const absentEntriesCount = gradeEntries.filter((e: any) => !e.isNoAbsenceDummy && e.isAbsent).length;
-                const lateEntriesCount = gradeEntries.filter((e: any) => e.isLate).length;
+                // Unique students counts or total counts
+                const absentEntriesCount = displayEntries.filter((e: any) => !e.isNoAbsenceDummy && e.isAbsent).length;
+                const lateEntriesCount = displayEntries.filter((e: any) => e.isLate).length;
                 return (
                   <div key={grade.id} className="flex flex-col rounded-2xl shadow-sm bg-white border border-slate-200 hover:shadow-md transition-all duration-200 overflow-hidden">
                     {/* Card Header: Grade Title + Classrooms */}
@@ -2863,7 +2935,7 @@ export default function AdminPanel({
                         ) : (
                           gradeClasses.map(cls => {
                             const cCode = getClassCode(cls.name);
-                            const count = gradeEntries.filter((entry: any) => entry.classId === cls.id && (entry.isAbsent || entry.isLate)).length;
+                            const count = displayEntries.filter((entry: any) => entry.classId === cls.id && (entry.isAbsent || entry.isLate)).length;
                             const hasAbsence = count > 0;
                             return (
                               <span
@@ -2892,23 +2964,28 @@ export default function AdminPanel({
                               <th className="py-2 px-1 text-center w-6">#</th>
                               <th className="py-2 px-1 text-right font-black w-12">الوقت</th>
                               <th className="py-2 px-1.5 text-right font-black">اسم الطالب</th>
-                              <th className="py-2 px-0.5 text-center font-black w-10">الحصة</th>
+                              <th className="py-2 px-0.5 text-center font-black">الحصة</th>
                               <th className="py-2 px-0.5 text-center font-black w-10">الفصل</th>
                               <th className="py-2 px-1 text-right font-black w-24">المعلم المعتمد</th>
                               {!isReadOnly && <th className="py-2 px-0.5 text-center w-8">⚙️</th>}
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100">
-                            {gradeEntries.length === 0 ? (
+                            {displayEntries.length === 0 ? (
                               <tr>
                                 <td colSpan={isReadOnly ? 6 : 7} className="py-10 text-center text-slate-400 font-black">
                                   <span className="underline decoration-dashed underline-offset-4 decoration-slate-300">لا يوجد غياب أو تأخر مسجل لهذا الصف اليوم 👍</span>
                                 </td>
                               </tr>
                             ) : (
-                              gradeEntries.map((entry: any, index: number) => (
+                              displayEntries.map((entry: any, index: number) => {
+                                const periodsToRender: string[] = entry.allPeriodCodes && entry.allPeriodCodes.length > 0 
+                                  ? entry.allPeriodCodes 
+                                  : [entry.periodCode];
+
+                                return (
                                 <tr 
-                                  key={entry.id} 
+                                  key={entry.id || `${entry.studentId}-${index}`} 
                                   className={`transition ${
                                     entry.isNoAbsenceDummy 
                                       ? "bg-emerald-50/60 hover:bg-emerald-100/80 dark:bg-emerald-950/20 dark:hover:bg-emerald-900/30" 
@@ -2951,28 +3028,59 @@ export default function AdminPanel({
                                           </span>
                                         </div>
                                       ) : (
-                                        <span className="font-bold text-slate-900 text-[10px] truncate block" title={entry.studentName}>
-                                          {entry.studentName}
-                                        </span>
+                                        <div className="flex items-center gap-1 min-w-0">
+                                          <span className="font-bold text-slate-900 text-[10px] truncate block" title={entry.studentName}>
+                                            {entry.studentName}
+                                          </span>
+                                          {entry.occurrences > 1 && (
+                                            <span className="bg-blue-100 text-blue-800 text-[9px] font-black px-1 py-0.2 rounded shrink-0" title={`مسجل في ${entry.occurrences} حصص`}>
+                                              ({entry.occurrences} حصص)
+                                            </span>
+                                          )}
+                                        </div>
                                       )}
                                     </div>
                                   </td>
                                   <td className="py-1 px-0.5 text-center">
-                                    <span className={`font-extrabold text-[9.5px] w-4.5 h-4.5 rounded flex items-center justify-center border shadow-3xs mx-auto ${getPeriodBadgeStyles(getPeriodNum(entry.periodCode))}`} title="الحصة">
-                                      {getPeriodNum(entry.periodCode)}
-                                    </span>
+                                    {entry.isNoAbsenceDummy ? (
+                                      <span className="text-slate-400 text-[9.5px]">-</span>
+                                    ) : (
+                                      <div className="flex items-center justify-center gap-0.5 flex-wrap">
+                                        {periodsToRender.map((pCode: string, pIdx: number) => (
+                                          <span 
+                                            key={pIdx} 
+                                            className={`font-extrabold text-[9.5px] w-4.5 h-4.5 rounded flex items-center justify-center border shadow-3xs ${getPeriodBadgeStyles(getPeriodNum(pCode))}`} 
+                                            title={`حصة ${getPeriodNum(pCode)}`}
+                                          >
+                                            {getPeriodNum(pCode)}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    )}
                                   </td>
                                   <td className="py-1 px-0.5 text-center">
                                     <span className={`font-extrabold text-[9.5px] w-4.5 h-4.5 rounded flex items-center justify-center border shadow-3xs mx-auto ${getClassBadgeStyles(getClassNum(entry.classCode))}`} title="الفصل">
                                       {getClassNum(entry.classCode)}
                                     </span>
                                   </td>
-                                  <td className="py-1 px-1 text-slate-600 font-medium text-[9.5px] whitespace-nowrap" title={entry.teacherName}>{entry.teacherName}</td>
+                                  <td className="py-1 px-1 text-slate-600 font-medium text-[9.5px] whitespace-nowrap truncate max-w-[100px]" title={entry.allTeachers ? entry.allTeachers.join("، ") : entry.teacherName}>
+                                    {entry.allTeachers && entry.allTeachers.length > 1 
+                                      ? entry.allTeachers.join("، ") 
+                                      : entry.teacherName}
+                                  </td>
                                   {!isReadOnly && (
                                     <td className="py-1 px-0.5 text-center">
                                       <button
                                         type="button"
-                                        onClick={() => handleDeleteAbsence(entry.recordId, entry.studentId, entry.isAbsent)}
+                                        onClick={() => {
+                                          if (entry.recordIds && entry.recordIds.length > 0) {
+                                            entry.recordIds.forEach((rId: string) => {
+                                              handleDeleteAbsence(rId, entry.studentId, entry.isAbsent);
+                                            });
+                                          } else {
+                                            handleDeleteAbsence(entry.recordId, entry.studentId, entry.isAbsent);
+                                          }
+                                        }}
                                         className="text-slate-400 hover:text-rose-600 p-0.5 rounded hover:bg-slate-100 transition cursor-pointer"
                                         title="حذف هذا التسجيل"
                                       >
@@ -2981,7 +3089,8 @@ export default function AdminPanel({
                                     </td>
                                   )}
                                 </tr>
-                              ))
+                              );
+                            })
                             )}
                           </tbody>
                         </table>
@@ -2989,14 +3098,19 @@ export default function AdminPanel({
 
                       {/* MOBILE TOUCH CARDS VIEW (Clean, touch-friendly, optimized for small screens) */}
                       <div className="block md:hidden divide-y divide-slate-100 p-2">
-                        {gradeEntries.length === 0 ? (
+                        {displayEntries.length === 0 ? (
                           <div className="py-8 text-center text-slate-400 font-black text-xs">
                             لا يوجد غياب أو تأخر مسجل لهذا الصف اليوم 👍
                           </div>
                         ) : (
-                          gradeEntries.map((entry: any, index: number) => (
+                          displayEntries.map((entry: any, index: number) => {
+                            const periodsToRender: string[] = entry.allPeriodCodes && entry.allPeriodCodes.length > 0 
+                              ? entry.allPeriodCodes 
+                              : [entry.periodCode];
+
+                            return (
                             <div 
-                              key={entry.id} 
+                              key={entry.id || `${entry.studentId}-${index}`} 
                               className={`p-3 rounded-xl mb-1.5 transition-all ${
                                 entry.isNoAbsenceDummy 
                                   ? "bg-emerald-50/70 border border-emerald-200/80" 
@@ -3024,7 +3138,14 @@ export default function AdminPanel({
                                         <span>{entry.studentName}</span>
                                       </div>
                                     ) : (
-                                      <span>{entry.studentName}</span>
+                                      <div className="flex items-center gap-1.5">
+                                        <span>{entry.studentName}</span>
+                                        {entry.occurrences > 1 && (
+                                          <span className="bg-blue-100 text-blue-800 text-[9px] font-black px-1.5 py-0.2 rounded">
+                                            ({entry.occurrences} حصص)
+                                          </span>
+                                        )}
+                                      </div>
                                     )}
                                   </div>
                                 </div>
@@ -3032,7 +3153,15 @@ export default function AdminPanel({
                                 {!isReadOnly && !entry.isNoAbsenceDummy && (
                                   <button
                                     type="button"
-                                    onClick={() => handleDeleteAbsence(entry.recordId, entry.studentId, entry.isAbsent)}
+                                    onClick={() => {
+                                      if (entry.recordIds && entry.recordIds.length > 0) {
+                                        entry.recordIds.forEach((rId: string) => {
+                                          handleDeleteAbsence(rId, entry.studentId, entry.isAbsent);
+                                        });
+                                      } else {
+                                        handleDeleteAbsence(entry.recordId, entry.studentId, entry.isAbsent);
+                                      }
+                                    }}
                                     className="text-slate-400 hover:text-rose-600 p-2 min-h-[36px] min-w-[36px] flex items-center justify-center rounded-lg active:bg-rose-50"
                                     title="حذف هذا التسجيل"
                                   >
@@ -3042,23 +3171,26 @@ export default function AdminPanel({
                               </div>
 
                               <div className="mt-2 pt-2 border-t border-slate-200/50 flex flex-wrap items-center justify-between gap-1.5 text-[11px]">
-                                <div className="flex items-center gap-1.5">
-                                  <span className={`font-black text-[10px] px-2 py-0.5 rounded-md border ${getPeriodBadgeStyles(getPeriodNum(entry.periodCode))}`}>
-                                    حصة {getPeriodNum(entry.periodCode)}
-                                  </span>
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  {periodsToRender.map((pCode: string, pIdx: number) => (
+                                    <span key={pIdx} className={`font-black text-[10px] px-2 py-0.5 rounded-md border ${getPeriodBadgeStyles(getPeriodNum(pCode))}`}>
+                                      حصة {getPeriodNum(pCode)}
+                                    </span>
+                                  ))}
                                   <span className={`font-black text-[10px] px-2 py-0.5 rounded-md border ${getClassBadgeStyles(getClassNum(entry.classCode))}`}>
                                     فصل {getClassNum(entry.classCode)}
                                   </span>
                                 </div>
 
                                 <div className="flex items-center gap-2 text-slate-500 font-bold text-[10px]">
-                                  <span>{entry.teacherName}</span>
+                                  <span>{entry.allTeachers && entry.allTeachers.length > 1 ? entry.allTeachers.join("، ") : entry.teacherName}</span>
                                   <span className="text-slate-300">•</span>
                                   <span className="font-mono text-slate-400">{entry.time}</span>
                                 </div>
                               </div>
                             </div>
-                          ))
+                            );
+                          })
                         )}
                       </div>
                     </div>
@@ -4530,7 +4662,7 @@ export default function AdminPanel({
                 <h2 className="text-sm font-black text-slate-800">تحديد الصف والفصل الدراسي:</h2>
               </div>
               
-              {/* Action Buttons: Grades/Classes Management + Backup Export/Import + Cloud Diagnostics */}
+              {/* Action Buttons: Grades/Classes Management */}
               <div className="flex items-center gap-2 flex-wrap">
                 {/* Orange Button to open School Structure Modal (Grades & Classes management) */}
                 <button
@@ -4542,40 +4674,6 @@ export default function AdminPanel({
                   className="bg-[#ff9800] hover:bg-[#f57c00] active:bg-amber-700 text-white font-extrabold px-4.5 py-2.5 rounded-xl text-xs flex items-center gap-2 shadow-xs transition-all cursor-pointer"
                 >
                   <span>⚙️ إضافة / تعديل الصفوف والفصول</span>
-                </button>
-
-                {/* Export Backup JSON Button */}
-                <button
-                  type="button"
-                  onClick={downloadSchoolBackupFile}
-                  className="bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-extrabold px-3.5 py-2.5 rounded-xl text-xs flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
-                  title="تنزيل نسخة احتياطية كاملة لبيانات المدرسة (ملف JSON) لنقلها فوراً لموقع Vercel أو أي جهاز"
-                >
-                  <Download className="w-4 h-4" />
-                  <span>💾 تصدير نسخة (JSON)</span>
-                </button>
-
-                {/* Import Backup JSON Button */}
-                <label className="bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-extrabold px-3.5 py-2.5 rounded-xl text-xs flex items-center gap-1.5 shadow-xs transition-all cursor-pointer">
-                  <Upload className="w-4 h-4" />
-                  <span>📥 استيراد نسخة (JSON)</span>
-                  <input
-                    type="file"
-                    accept=".json"
-                    className="hidden"
-                    onChange={handleBackupFileChange}
-                  />
-                </label>
-
-                {/* Test Cloud Connection Button */}
-                <button
-                  type="button"
-                  onClick={handleTestCloudConnection}
-                  className="bg-slate-800 hover:bg-slate-900 text-white font-extrabold px-3 py-2.5 rounded-xl text-xs flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
-                  title="فحص الاتصال بقاعدة بيانات Cloud Firestore وحالة المزامنة السحابية"
-                >
-                  <CloudLightning className="w-4 h-4 text-amber-400" />
-                  <span>فحص السحابة</span>
                 </button>
               </div>
             </div>
