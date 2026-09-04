@@ -178,62 +178,38 @@ function getLocalItems(colName: string, uid?: string): any[] {
   const currentEmail = eff.email?.toLowerCase() || "";
   if (typeof window === "undefined") return [];
   try {
-    const gatheredMap = new Map<string, any>();
-
-    // 1. Try UID specific key
+    // 1. Check primary UID key
     if (currentUid) {
       const rawUser = localStorage.getItem(`school_offline_cache_${currentUid}_${colName}`);
       if (rawUser) {
         try {
           const parsed = JSON.parse(rawUser);
-          if (Array.isArray(parsed)) {
-            parsed.forEach(item => { if (item?.id) gatheredMap.set(item.id, item); });
-          }
+          if (Array.isArray(parsed)) return parsed;
         } catch (_) {}
       }
     }
 
-    // 2. Try Email specific key
+    // 2. Check primary Email key
     if (currentEmail) {
       const rawEmail = localStorage.getItem(`school_offline_cache_${currentEmail}_${colName}`);
       if (rawEmail) {
         try {
           const parsed = JSON.parse(rawEmail);
-          if (Array.isArray(parsed)) {
-            parsed.forEach(item => { if (item?.id && !gatheredMap.has(item.id)) gatheredMap.set(item.id, item); });
-          }
+          if (Array.isArray(parsed)) return parsed;
         } catch (_) {}
       }
     }
 
-    // 3. Try generic key
+    // 3. Check generic fallback key
     const rawGeneric = localStorage.getItem(`school_offline_cache_${colName}`);
     if (rawGeneric) {
       try {
         const parsed = JSON.parse(rawGeneric);
-        if (Array.isArray(parsed)) {
-          parsed.forEach(item => { if (item?.id && !gatheredMap.has(item.id)) gatheredMap.set(item.id, item); });
-        }
+        if (Array.isArray(parsed)) return parsed;
       } catch (_) {}
     }
 
-    // 4. Scan all other localStorage keys matching this collection name
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (key && key.startsWith("school_offline_cache_") && key.endsWith(`_${colName}`)) {
-        try {
-          const raw = localStorage.getItem(key);
-          if (raw) {
-            const parsed = JSON.parse(raw);
-            if (Array.isArray(parsed)) {
-              parsed.forEach(item => { if (item?.id && !gatheredMap.has(item.id)) gatheredMap.set(item.id, item); });
-            }
-          }
-        } catch (_) {}
-      }
-    }
-
-    return Array.from(gatheredMap.values());
+    return [];
   } catch (e) {
     return [];
   }
@@ -251,11 +227,29 @@ export function getLocalCollection<T = any>(colName: string, uid?: string): T[] 
 function setLocalItems(colName: string, items: any[], uid?: string) {
   const eff = getEffectiveUidAndEmail();
   const currentUid = uid || eff.uid || "";
-  if (!currentUid && !eff.email) return;
+  const currentEmail = eff.email?.toLowerCase() || "";
   if (typeof window === "undefined") return;
   try {
     const safeItems = Array.isArray(items) ? items : [];
-    localStorage.setItem(`school_offline_cache_${currentUid}_${colName}`, JSON.stringify(safeItems));
+    const json = JSON.stringify(safeItems);
+
+    if (currentUid) {
+      localStorage.setItem(`school_offline_cache_${currentUid}_${colName}`, json);
+    }
+    if (currentEmail) {
+      localStorage.setItem(`school_offline_cache_${currentEmail}_${colName}`, json);
+    }
+    localStorage.setItem(`school_offline_cache_${colName}`, json);
+
+    // Synchronize or clean any secondary/legacy keys for this collection so stale data never resurrects
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith("school_offline_cache_") && key.endsWith(`_${colName}`)) {
+        try {
+          localStorage.setItem(key, json);
+        } catch (_) {}
+      }
+    }
   } catch (e) {}
 }
 
@@ -265,7 +259,7 @@ function saveOrUpdateLocalItem(colName: string, item: any, uid?: string) {
   if ((!currentUid && !eff.email) || !item) return;
   const items = getLocalItems(colName, currentUid);
   const safeItems = Array.isArray(items) ? [...items] : [];
-  const idx = safeItems.findIndex(i => i && i.id === item.id);
+  const idx = safeItems.findIndex(i => i && (i.id === item.id || (i._docId && i._docId === item.id)));
   if (idx >= 0) {
     safeItems[idx] = { ...safeItems[idx], ...item };
   } else {
@@ -276,25 +270,63 @@ function saveOrUpdateLocalItem(colName: string, item: any, uid?: string) {
 }
 
 function removeLocalItem(colName: string, id: string, uid?: string) {
-  const eff = getEffectiveUidAndEmail();
-  const currentUid = uid || eff.uid || "";
-  if (!currentUid && !eff.email) return;
-  const items = getLocalItems(colName, currentUid);
-  const safeItems = Array.isArray(items) ? items : [];
-  const filtered = safeItems.filter(i => i && i.id !== id);
-  setLocalItems(colName, filtered, currentUid);
-  notifyCollectionSubscribers(colName, filtered);
+  if (typeof window === "undefined" || !id) return;
+  try {
+    const eff = getEffectiveUidAndEmail();
+    const currentUid = uid || eff.uid || "";
+
+    // Purge the item from EVERY cache key in localStorage for this collection
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith("school_offline_cache_") && key.endsWith(`_${colName}`)) {
+        try {
+          const raw = localStorage.getItem(key);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) {
+              const filtered = parsed.filter(i => i && i.id !== id && i._docId !== id && i._origId !== id);
+              localStorage.setItem(key, JSON.stringify(filtered));
+            }
+          }
+        } catch (_) {}
+      }
+    }
+
+    const currentItems = getLocalItems(colName, currentUid);
+    const filtered = currentItems.filter(i => i && i.id !== id && i._docId !== id && i._origId !== id);
+    setLocalItems(colName, filtered, currentUid);
+    notifyCollectionSubscribers(colName, filtered);
+  } catch (e) {}
 }
 
 function removeLocalItemsBy(colName: string, predicate: (item: any) => boolean, uid?: string) {
-  const eff = getEffectiveUidAndEmail();
-  const currentUid = uid || eff.uid || "";
-  if (!currentUid && !eff.email) return;
-  const items = getLocalItems(colName, currentUid);
-  const safeItems = Array.isArray(items) ? items : [];
-  const filtered = safeItems.filter(i => i && !predicate(i));
-  setLocalItems(colName, filtered, currentUid);
-  notifyCollectionSubscribers(colName, filtered);
+  if (typeof window === "undefined") return;
+  try {
+    const eff = getEffectiveUidAndEmail();
+    const currentUid = uid || eff.uid || "";
+
+    // Purge matching items from EVERY cache key in localStorage for this collection
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith("school_offline_cache_") && key.endsWith(`_${colName}`)) {
+        try {
+          const raw = localStorage.getItem(key);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) {
+              const filtered = parsed.filter(i => i && !predicate(i));
+              localStorage.setItem(key, JSON.stringify(filtered));
+            }
+          }
+        } catch (_) {}
+      }
+    }
+
+    const currentItems = getLocalItems(colName, currentUid);
+    const filtered = currentItems.filter(i => i && !predicate(i));
+    setLocalItems(colName, filtered, currentUid);
+    notifyCollectionSubscribers(colName, filtered);
+  } catch (e) {}
 }
 
 function generateLocalId(prefix: string = "id"): string {
@@ -757,20 +789,18 @@ async function fetchAndFilterCollection(colName: string, force: boolean = false)
       const data = docSnap.data();
       if (isDocBelongingToUser(data, currentUid, currentEmail) && !seenIds.has(docSnap.id)) {
         seenIds.add(docSnap.id);
-        results.push({ id: docSnap.id, ...data });
+        results.push({ ...data, id: docSnap.id, _docId: docSnap.id, _origId: (data as any)?.id });
       }
     });
 
     // Update local cache and hub with authoritative Firestore data
-    if (results.length > 0 || localList.length === 0) {
-      setLocalItems(colName, results, currentUid);
-      if (currentEmail) setLocalItems(colName, results, currentEmail);
-      const targetHub = getCollectionHub(colName);
-      targetHub.latestData = results;
-      targetHub.lastUpdated = Date.now();
-    }
+    setLocalItems(colName, results, currentUid);
+    if (currentEmail) setLocalItems(colName, results, currentEmail);
+    const targetHub = getCollectionHub(colName);
+    targetHub.latestData = results;
+    targetHub.lastUpdated = Date.now();
 
-    return results.length > 0 ? results : localList;
+    return results;
   } catch (err: any) {
     handleFirestoreError(err);
     return localList;
@@ -1469,29 +1499,98 @@ export async function addGradesBatch(names: string[]): Promise<{ id: string; nam
   return results;
 }
 
-// Delete Grade (Instant 0ms local purge + real-time Firestore cascade delete)
-export async function deleteGrade(id: string): Promise<void> {
+// Delete Grade (Instant 0ms local purge + authoritative real-time Firestore cascade delete)
+export async function deleteGrade(id: string, gradeName?: string): Promise<void> {
   const eff = getEffectiveUidAndEmail();
   const uid = eff.uid;
 
-  // 1. Gather all associated class & student IDs from local cache before removal
+  // 1. Determine grade name if not passed
+  const localGrades = getLocalItems(GRADES_COLL, uid);
+  const targetGrade = localGrades.find(g => g.id === id || (g._docId && g._docId === id));
+  const resolvedGradeName = (gradeName || targetGrade?.name)?.trim();
+
+  // 2. Gather all associated class & student IDs from local cache
   const localClasses = getLocalItems(CLASSES_COLL, uid);
-  const classIdsToDelete = localClasses.filter(c => c.gradeId === id).map(c => c.id);
+  const matchingClasses = localClasses.filter(c => 
+    c.gradeId === id || 
+    (resolvedGradeName && (c.gradeId === resolvedGradeName || c.gradeName === resolvedGradeName))
+  );
+  const classIdsToDelete = new Set<string>(matchingClasses.map(c => c.id));
   
   const localStudents = getLocalItems(STUDENTS_COLL, uid);
-  const studentIdsToDelete = localStudents.filter(s => s.gradeId === id || classIdsToDelete.includes(s.classId)).map(s => s.id);
+  const matchingStudents = localStudents.filter(s => 
+    s.gradeId === id || 
+    (resolvedGradeName && s.gradeName === resolvedGradeName) || 
+    classIdsToDelete.has(s.classId)
+  );
+  const studentIdsToDelete = new Set<string>(matchingStudents.map(s => s.id));
 
-  // 2. Delete from local storage cache immediately (0ms instant UI update)
-  removeLocalItem(GRADES_COLL, id, uid);
-  removeLocalItemsBy(CLASSES_COLL, (c) => c.gradeId === id, uid);
-  removeLocalItemsBy(STUDENTS_COLL, (s) => s.gradeId === id || classIdsToDelete.includes(s.classId), uid);
+  // 3. Delete from local storage cache immediately across ALL keys (0ms instant UI update)
+  removeLocalItemsBy(GRADES_COLL, (g) => g.id === id || (g._docId && g._docId === id) || (resolvedGradeName && g.name?.trim() === resolvedGradeName), uid);
+  removeLocalItemsBy(CLASSES_COLL, (c) => c.gradeId === id || classIdsToDelete.has(c.id) || (resolvedGradeName && (c.gradeId === resolvedGradeName || c.gradeName === resolvedGradeName)), uid);
+  removeLocalItemsBy(STUDENTS_COLL, (s) => s.gradeId === id || studentIdsToDelete.has(s.id) || (resolvedGradeName && s.gradeName === resolvedGradeName) || classIdsToDelete.has(s.classId), uid);
 
-  // 3. Delete from Firestore in real time
-  const batch = writeBatch(db);
-  batch.delete(doc(db, GRADES_COLL, id));
-  classIdsToDelete.forEach(cId => batch.delete(doc(db, CLASSES_COLL, cId)));
-  studentIdsToDelete.forEach(sId => batch.delete(doc(db, STUDENTS_COLL, sId)));
-  await safeFirestoreWrite(batch.commit(), 300);
+  // 4. Cascade delete from Firestore across all matching documents
+  try {
+    const batch = writeBatch(db);
+    let batchCount = 0;
+
+    // Direct deletion by ID
+    if (id) {
+      batch.delete(doc(db, GRADES_COLL, id));
+      batchCount++;
+    }
+
+    // Query Firestore GRADES_COLL for any docs with this id or name
+    try {
+      const gSnap = await getDocs(collection(db, GRADES_COLL));
+      gSnap.forEach(docSnap => {
+        const d = docSnap.data();
+        const matchId = docSnap.id === id || d.id === id;
+        const matchName = resolvedGradeName && d.name?.trim() === resolvedGradeName;
+        if (matchId || matchName) {
+          batch.delete(docSnap.ref);
+          batchCount++;
+        }
+      });
+    } catch (_) {}
+
+    // Query Firestore CLASSES_COLL for any classes linked to this grade
+    try {
+      const cSnap = await getDocs(collection(db, CLASSES_COLL));
+      cSnap.forEach(docSnap => {
+        const d = docSnap.data();
+        const matchId = classIdsToDelete.has(docSnap.id) || classIdsToDelete.has(d.id);
+        const matchGradeId = d.gradeId === id || (resolvedGradeName && (d.gradeId === resolvedGradeName || d.gradeName === resolvedGradeName));
+        if (matchId || matchGradeId) {
+          classIdsToDelete.add(docSnap.id);
+          batch.delete(docSnap.ref);
+          batchCount++;
+        }
+      });
+    } catch (_) {}
+
+    // Query Firestore STUDENTS_COLL for any students linked to this grade or classes
+    try {
+      const sSnap = await getDocs(collection(db, STUDENTS_COLL));
+      sSnap.forEach(docSnap => {
+        const d = docSnap.data();
+        const matchId = studentIdsToDelete.has(docSnap.id) || studentIdsToDelete.has(d.id);
+        const matchGrade = d.gradeId === id || (resolvedGradeName && d.gradeName === resolvedGradeName);
+        const matchClass = classIdsToDelete.has(d.classId);
+        if (matchId || matchGrade || matchClass) {
+          batch.delete(docSnap.ref);
+          batchCount++;
+        }
+      });
+    } catch (_) {}
+
+    if (batchCount > 0) {
+      await safeFirestoreWrite(batch.commit(), 4000);
+    }
+  } catch (err: any) {
+    handleFirestoreError(err);
+  }
 }
 
 // Add Class (Instant optimistic return + real-time Firestore persistence)
@@ -1591,24 +1690,146 @@ export async function addClassesBatch(classesList: { name: string; gradeId: stri
   return results;
 }
 
-// Delete Class (Instant 0ms local purge + real-time Firestore cascade delete)
-export async function deleteClass(id: string): Promise<void> {
+// Delete Class (Instant 0ms local purge + authoritative real-time Firestore cascade delete)
+export async function deleteClass(id: string, gradeId?: string, className?: string): Promise<void> {
   const eff = getEffectiveUidAndEmail();
   const uid = eff.uid;
 
-  // 1. Gather all student IDs in this class before removal
+  // 1. Find class details from local cache
+  const localClasses = getLocalItems(CLASSES_COLL, uid);
+  const targetClass = localClasses.find(c => c.id === id || (c._docId && c._docId === id));
+  const targetGradeId = gradeId || targetClass?.gradeId;
+  const targetClassName = (className || targetClass?.name)?.trim();
+
+  // 2. Gather student IDs in this class
   const localStudents = getLocalItems(STUDENTS_COLL, uid);
-  const studentIdsToDelete = localStudents.filter(s => s.classId === id).map(s => s.id);
+  const studentIdsToDelete = new Set<string>(
+    localStudents
+      .filter(s => s.classId === id || (targetGradeId && targetClassName && s.gradeId === targetGradeId && s.className?.trim() === targetClassName))
+      .map(s => s.id)
+  );
 
-  // 2. Delete from local cache immediately (0ms instant UI update)
-  removeLocalItem(CLASSES_COLL, id, uid);
-  removeLocalItemsBy(STUDENTS_COLL, (s) => s.classId === id, uid);
+  // 3. Purge from ALL local storage keys immediately (0ms)
+  removeLocalItemsBy(CLASSES_COLL, (c) => 
+    c.id === id || 
+    (c._docId && c._docId === id) ||
+    (targetGradeId && targetClassName && (c.gradeId === targetGradeId || c.gradeName === targetGradeId) && c.name?.trim() === targetClassName),
+    uid
+  );
+  removeLocalItemsBy(STUDENTS_COLL, (s) => s.classId === id || studentIdsToDelete.has(s.id), uid);
 
-  // 3. Asynchronous Firestore batch delete
-  const batch = writeBatch(db);
-  batch.delete(doc(db, CLASSES_COLL, id));
-  studentIdsToDelete.forEach(sId => batch.delete(doc(db, STUDENTS_COLL, sId)));
-  await safeFirestoreWrite(batch.commit(), 300);
+  // 4. Query & delete all matching docs from Firestore
+  try {
+    const batch = writeBatch(db);
+    let batchCount = 0;
+
+    if (id) {
+      batch.delete(doc(db, CLASSES_COLL, id));
+      batchCount++;
+    }
+
+    try {
+      const cSnap = await getDocs(collection(db, CLASSES_COLL));
+      cSnap.forEach(docSnap => {
+        const d = docSnap.data();
+        const matchId = docSnap.id === id || d.id === id;
+        const matchGradeAndName = targetGradeId && targetClassName && 
+          (d.gradeId === targetGradeId || d.gradeName === targetGradeId) && 
+          d.name?.trim() === targetClassName;
+        if (matchId || matchGradeAndName) {
+          batch.delete(docSnap.ref);
+          batchCount++;
+        }
+      });
+    } catch (_) {}
+
+    try {
+      const sSnap = await getDocs(collection(db, STUDENTS_COLL));
+      sSnap.forEach(docSnap => {
+        const d = docSnap.data();
+        const matchId = studentIdsToDelete.has(docSnap.id) || studentIdsToDelete.has(d.id) || d.classId === id;
+        if (matchId) {
+          batch.delete(docSnap.ref);
+          batchCount++;
+        }
+      });
+    } catch (_) {}
+
+    if (batchCount > 0) {
+      await safeFirestoreWrite(batch.commit(), 4000);
+    }
+  } catch (err: any) {
+    handleFirestoreError(err);
+  }
+}
+
+// Delete all classes for a specific grade
+export async function deleteClassesForGrade(gradeId: string, gradeName?: string): Promise<void> {
+  const eff = getEffectiveUidAndEmail();
+  const uid = eff.uid;
+  const resolvedGradeName = gradeName?.trim();
+
+  // 1. Find all matching classes
+  const localClasses = getLocalItems(CLASSES_COLL, uid);
+  const matchingClasses = localClasses.filter(c => 
+    c.gradeId === gradeId || 
+    (resolvedGradeName && (c.gradeId === resolvedGradeName || c.gradeName === resolvedGradeName))
+  );
+  const classIds = new Set<string>(matchingClasses.map(c => c.id));
+
+  // 2. Local storage purge
+  removeLocalItemsBy(CLASSES_COLL, (c) => 
+    c.gradeId === gradeId || 
+    classIds.has(c.id) || 
+    (resolvedGradeName && (c.gradeId === resolvedGradeName || c.gradeName === resolvedGradeName)),
+    uid
+  );
+
+  // 3. Firestore delete
+  try {
+    const batch = writeBatch(db);
+    let count = 0;
+    const snap = await getDocs(collection(db, CLASSES_COLL));
+    snap.forEach(docSnap => {
+      const d = docSnap.data();
+      if (classIds.has(docSnap.id) || classIds.has(d.id) || d.gradeId === gradeId || (resolvedGradeName && (d.gradeId === resolvedGradeName || d.gradeName === resolvedGradeName))) {
+        batch.delete(docSnap.ref);
+        count++;
+      }
+    });
+    if (count > 0) {
+      await safeFirestoreWrite(batch.commit(), 4000);
+    }
+  } catch (e) {
+    console.warn("Error deleting classes for grade:", e);
+  }
+}
+
+// Completely purge all grades and classes
+export async function deleteAllGradesAndClasses(): Promise<void> {
+  const eff = getEffectiveUidAndEmail();
+  const uid = eff.uid;
+
+  // Clear local storage for grades and classes
+  setLocalItems(GRADES_COLL, [], uid);
+  setLocalItems(CLASSES_COLL, [], uid);
+  notifyCollectionSubscribers(GRADES_COLL, []);
+  notifyCollectionSubscribers(CLASSES_COLL, []);
+
+  // Delete from Firestore
+  try {
+    const [gSnap, cSnap] = await Promise.all([
+      getDocs(collection(db, GRADES_COLL)),
+      getDocs(collection(db, CLASSES_COLL))
+    ]);
+
+    const batch = writeBatch(db);
+    gSnap.forEach(d => batch.delete(d.ref));
+    cSnap.forEach(d => batch.delete(d.ref));
+    await safeFirestoreWrite(batch.commit(), 5000);
+  } catch (e) {
+    console.warn("Error deleting all grades and classes:", e);
+  }
 }
 
 // Restore default classes (e.g. الفصل 1 إلى الفصل 6) for a specific grade or first grade
@@ -2020,12 +2241,13 @@ function subscribeToCollection(colName: string, callback: (data: any[]) => void,
           const data = docSnap.data();
           if (isDocBelongingToUser(data, activeUid, activeEmail) && !seenIds.has(docSnap.id)) {
             seenIds.add(docSnap.id);
-            results.push({ id: docSnap.id, ...data });
+            results.push({ ...data, id: docSnap.id, _docId: docSnap.id, _origId: (data as any)?.id });
           }
         });
 
-        // Update local storage cache
+        // Update local storage cache with authoritative snapshot (including empty list)
         setLocalItems(colName, results, activeUid);
+        if (activeEmail) setLocalItems(colName, results, activeEmail);
         hub.latestData = results;
         hub.lastUpdated = Date.now();
 

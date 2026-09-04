@@ -8,6 +8,8 @@ import {
   addClass, 
   addClassesBatch,
   deleteClass, 
+  deleteClassesForGrade,
+  deleteAllGradesAndClasses,
   restoreGradeDefaultClasses,
   restoreFirstGradeClasses,
   addTeacher, 
@@ -1970,23 +1972,20 @@ export default function AdminPanel({
   };
 
   const handleDeleteGrade = (id: string, name: string) => {
-    if (!isGoogleAuthenticated) {
-      onRequireGoogleLogin?.();
-      return;
-    }
     confirmAction(
       "حذف الصف الدراسي",
       `هل أنت متأكد من حذف ${name}؟ سيتم حذف جميع الفصول والطلاب التابعين له تلقائياً ولا يمكن التراجع عن هذا الإجراء.`,
       async () => {
         setSubmitting(prev => ({ ...prev, ['deleteGrade_' + id]: true }));
         try {
-          setGrades(prev => prev.filter(g => g.id !== id));
-          setClasses(prev => prev.filter(c => c.gradeId !== id));
-          setStudents(prev => prev.filter(s => s.gradeId !== id));
+          const trimmedName = name.trim();
+          setGrades(prev => prev.filter(g => g.id !== id && g.name?.trim() !== trimmedName));
+          setClasses(prev => prev.filter(c => c.gradeId !== id && (c.gradeId as any) !== trimmedName && (c as any).gradeName !== trimmedName));
+          setStudents(prev => prev.filter(s => s.gradeId !== id && (s.gradeId as any) !== trimmedName && (s as any).gradeName !== trimmedName));
           if (selectedGradeIdForClasses === id) {
             setSelectedGradeIdForClasses("");
           }
-          await deleteGrade(id);
+          await deleteGrade(id, name);
           showMessage("تم حذف الصف وفصوله بنجاح!");
         } catch (e) {
           showMessage("حدث خطأ أثناء الحذف", "error");
@@ -2049,20 +2048,20 @@ export default function AdminPanel({
     }
   };
 
-  const handleDeleteClass = (id: string, name: string) => {
-    if (!isGoogleAuthenticated) {
-      onRequireGoogleLogin?.();
-      return;
-    }
+  const handleDeleteClass = (id: string, name: string, gradeId?: string) => {
     confirmAction(
       "حذف الفصل الدراسي",
       `هل أنت متأكد من حذف فصل ${name}؟ لا يمكن التراجع عن هذا الإجراء.`,
       async () => {
         try {
-          setClasses(prev => prev.filter(c => c.id !== id));
+          const trimmedName = name.trim();
+          setClasses(prev => prev.filter(c => 
+            c.id !== id && 
+            !(gradeId && c.gradeId === gradeId && c.name?.trim() === trimmedName)
+          ));
           setStudents(prev => prev.filter(s => s.classId !== id));
           showMessage("تم حذف الفصل بنجاح!");
-          await deleteClass(id);
+          await deleteClass(id, gradeId, name);
         } catch (e) {
           showMessage("حدث خطأ أثناء الحذف", "error");
         }
@@ -3846,6 +3845,30 @@ export default function AdminPanel({
                   <span>🔄</span>
                   <span>استرجاع فصول الصف الأول (1-6)</span>
                 </button>
+
+                {grades.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      confirmAction(
+                        "حذف جميع الصفوف والفصول نهائياً",
+                        "هل أنت متأكد من حذف جميع الصفوف الدراسية والفصول؟ سيتم حذفها نهائياً من قاعدة البيانات والتخزين المؤقت ولن تعود مجدداً.",
+                        async () => {
+                          setGrades([]);
+                          setClasses([]);
+                          setSelectedGradeIdForClasses("");
+                          await deleteAllGradesAndClasses();
+                          showMessage("تم حذف جميع الصفوف والفصول بنجاح نهائي!");
+                        }
+                      );
+                    }}
+                    className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-2xs transition cursor-pointer"
+                    title="حذف جميع الصفوف والفصول بشكل نهائي"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>حذف كل الصفوف والفصول</span>
+                  </button>
+                )}
               </div>
 
               {grades.length > 0 && classes.length === 0 && (
@@ -4006,6 +4029,27 @@ export default function AdminPanel({
                                 >
                                   + إضافة (1-10)
                                 </button>
+                                {gradeClasses.length > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      confirmAction(
+                                        "حذف جميع فصول هذا الصف",
+                                        `هل أنت متأكد من حذف جميع فصول ${grade.name}؟ لن تعود الفصول مرة أخرى.`,
+                                        async () => {
+                                          setClasses(prev => prev.filter(c => c.gradeId !== grade.id));
+                                          await deleteClassesForGrade(grade.id, grade.name);
+                                          showMessage("تم حذف جميع فصول هذا الصف بنجاح!");
+                                        }
+                                      );
+                                    }}
+                                    className="text-[10px] bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold px-2 py-0.5 rounded-md border border-rose-200 transition cursor-pointer flex items-center gap-1"
+                                    title="حذف جميع فصول هذا الصف نهائياً"
+                                  >
+                                    <Trash2 className="w-3 h-3" />
+                                    <span>مسح فصول الصف</span>
+                                  </button>
+                                )}
                               </div>
                             </div>
                             {gradeClasses.length === 0 && (
@@ -4057,8 +4101,12 @@ export default function AdminPanel({
                                   onClick={() => {
                                     if (exists && cls) {
                                       // Instant 0ms optimistic removal
-                                      setClasses(prev => prev.filter(c => c.id !== cls.id));
-                                      deleteClass(cls.id).catch(() => {});
+                                      const cName = cls.name?.trim() || `الفصل ${num}`;
+                                      setClasses(prev => prev.filter(c => 
+                                        c.id !== cls.id && 
+                                        !(c.gradeId === grade.id && (c.name?.trim() === cName || c.name?.trim() === `الفصل ${num}` || c.name?.trim() === `${num}`))
+                                      ));
+                                      deleteClass(cls.id, grade.id, cName).catch(() => {});
                                     } else {
                                       const className = `الفصل ${num}`;
                                       const tempId = `temp_cls_${Date.now()}_${num}`;
@@ -5016,7 +5064,7 @@ export default function AdminPanel({
                                     type="button"
                                     onClick={async () => {
                                       if (exists && cls) {
-                                        handleDeleteClass(cls.id, cls.name);
+                                        handleDeleteClass(cls.id, cls.name, grade.id);
                                       } else {
                                         try {
                                           const className = `الفصل ${num}`;
