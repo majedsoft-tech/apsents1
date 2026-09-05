@@ -321,7 +321,6 @@ export default function AdminPanel({
   const [activeStatsTab, setActiveStatsTab] = useState<"attendance" | "morning_delay" | "selected_attendance" | "student_report">("attendance");
   const [selectedAttendanceDate, setSelectedAttendanceDate] = useState<string>(getTodayDateString());
   const [attendanceViewMode, setAttendanceViewMode] = useState<"list" | "grid">("list");
-  const [attendanceGroupMode, setAttendanceGroupMode] = useState<"all" | "unique">("unique");
   const [hasNewBehavior, setHasNewBehavior] = useState<boolean>(false);
   const [newBehaviorIds, setNewBehaviorIds] = useState<string[]>([]);
   const [behaviorSearchFilter, setBehaviorSearchFilter] = useState<string>("");
@@ -1419,7 +1418,7 @@ export default function AdminPanel({
         // Robust student name resolver
         const resolveStudentName = (stId: string, recordObj?: any): string => {
           if (!stId) return "";
-          if (stId === "no-absence") return "لا يوجد غياب أو تأخر";
+          if (stId === "no-absence") return "لا يوجد غياب";
 
           // 1. Direct from record's embedded studentNames mapping
           if (recordObj?.studentNames && typeof recordObj.studentNames === "object" && recordObj.studentNames[stId]) {
@@ -1545,7 +1544,7 @@ export default function AdminPanel({
             id: `${rec.id}-noabs`,
             recordId: rec.id,
             studentId: "no-absence",
-            studentName: "لا يوجد غياب أو تأخر",
+            studentName: "لا يوجد غياب",
             status: "حضور كامل",
             periodCode: pCode,
             classCode: classInfo.classCode,
@@ -1641,9 +1640,22 @@ export default function AdminPanel({
         }
       });
 
-      // Sort entries ascending first by Class (فصل) and then by Period (حصة)
+      // Sort entries ascending first by Period (حصة) and then by Class (فصل)
       const sortEntriesList = (list: any[]) => {
         list.sort((a, b) => {
+          // 1. First priority: Period (الحصة)
+          const pNumAStr = getPeriodNum(a.periodCode || a.period || "");
+          const pNumBStr = getPeriodNum(b.periodCode || b.period || "");
+          let periodA = (pNumAStr === "صباحي" || pNumAStr === "ص" || pNumAStr === "طابور" || a.isMorningDelay) ? 0 : parseInt(pNumAStr, 10);
+          let periodB = (pNumBStr === "صباحي" || pNumBStr === "ص" || pNumBStr === "طابور" || b.isMorningDelay) ? 0 : parseInt(pNumBStr, 10);
+          if (isNaN(periodA)) periodA = 999;
+          if (isNaN(periodB)) periodB = 999;
+
+          if (periodA !== periodB) {
+            return periodA - periodB;
+          }
+
+          // 2. Second priority: Class (الفصل)
           const numAStr = getClassNum(a.classCode || "");
           const numBStr = getClassNum(b.classCode || "");
           let classA = parseInt(numAStr, 10);
@@ -1662,17 +1674,7 @@ export default function AdminPanel({
             return classA - classB;
           }
 
-          const pNumAStr = getPeriodNum(a.periodCode || a.period || "");
-          const pNumBStr = getPeriodNum(b.periodCode || b.period || "");
-          let periodA = (pNumAStr === "صباحي" || pNumAStr === "ص" || pNumAStr === "طابور" || a.isMorningDelay) ? 0 : parseInt(pNumAStr, 10);
-          let periodB = (pNumBStr === "صباحي" || pNumBStr === "ص" || pNumBStr === "طابور" || b.isMorningDelay) ? 0 : parseInt(pNumBStr, 10);
-          if (isNaN(periodA)) periodA = 999;
-          if (isNaN(periodB)) periodB = 999;
-
-          if (periodA !== periodB) {
-            return periodA - periodB;
-          }
-
+          // 3. Third priority: Student name (اسم الطالب)
           return (a.studentName || "").localeCompare(b.studentName || "", "ar");
         });
       };
@@ -2877,37 +2879,8 @@ export default function AdminPanel({
               </button>
             </div>
 
-            {/* Actions: Grouping Toggle & Print Action */}
+            {/* Actions: Print Action */}
             <div className="flex items-center gap-2">
-              {activeStatsTab === "attendance" && (
-                <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200">
-                  <button
-                    type="button"
-                    onClick={() => setAttendanceGroupMode("unique")}
-                    className={`px-2.5 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer ${
-                      attendanceGroupMode === "unique"
-                        ? "bg-white text-blue-800 shadow-3xs border border-slate-200/60"
-                        : "text-slate-600 hover:text-slate-900"
-                    }`}
-                    title="عرض اسم كل طالب مرة واحدة فقط مع دمج الحصص المسجلة عليه"
-                  >
-                    بدون تكرار الأسماء
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setAttendanceGroupMode("all")}
-                    className={`px-2.5 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer ${
-                      attendanceGroupMode === "all"
-                        ? "bg-white text-blue-800 shadow-3xs border border-slate-200/60"
-                        : "text-slate-600 hover:text-slate-900"
-                    }`}
-                    title="عرض كل التسجيلات بالتفصيل لكل حصة"
-                  >
-                    عرض كل الحصص
-                  </button>
-                </div>
-              )}
-
               <button
                 type="button"
                 onClick={() => {
@@ -3009,66 +2982,49 @@ export default function AdminPanel({
                   return rawId ? `raw_${rawId}` : `entry_${entry.id}`;
                 };
 
-                // Group by student if attendanceGroupMode === "unique" to prevent name repetition
-                let displayEntries: any[] = [];
-                if (attendanceGroupMode === "all") {
-                  const seenPair = new Set<string>();
-                  displayEntries = rawGradeEntries.filter((e: any) => {
-                    if (e.isNoAbsenceDummy) return true;
-                    const key = `${getCanonicalStudentKey(e)}_${e.periodCode}`;
-                    if (seenPair.has(key)) return false;
-                    seenPair.add(key);
-                    return true;
-                  });
-                } else {
-                  const studentMap = new Map<string, any>();
-                  rawGradeEntries.forEach((entry: any) => {
-                    // Always show dummy no-absence as is
-                    if (entry.isNoAbsenceDummy) {
-                      displayEntries.push(entry);
-                      return;
-                    }
-                    const sKey = getCanonicalStudentKey(entry);
-                    if (!studentMap.has(sKey)) {
-                      studentMap.set(sKey, {
-                        ...entry,
-                        allPeriodCodes: entry.periodCode ? [entry.periodCode] : [],
-                        allTeachers: entry.teacherName ? [entry.teacherName] : [],
-                        recordIds: entry.recordId ? [entry.recordId] : [],
-                        occurrences: 1
-                      });
-                    } else {
-                      const existing = studentMap.get(sKey);
-                      if (entry.periodCode && !existing.allPeriodCodes.includes(entry.periodCode)) {
-                        existing.allPeriodCodes.push(entry.periodCode);
-                      }
-                      if (entry.teacherName && !existing.allTeachers.includes(entry.teacherName)) {
-                        existing.allTeachers.push(entry.teacherName);
-                      }
-                      if (entry.recordId && !existing.recordIds.includes(entry.recordId)) {
-                        existing.recordIds.push(entry.recordId);
-                      }
-                      existing.occurrences += 1;
-                      if (entry.isAbsent) existing.isAbsent = true;
-                      if ((entry.studentName?.length || 0) > (existing.studentName?.length || 0)) {
-                        existing.studentName = entry.studentName;
-                      }
-                    }
-                  });
+                // Display all absent and late students across all periods for the selected date
+                const seenPair = new Set<string>();
+                const displayEntries = rawGradeEntries.filter((e: any) => {
+                  if (e.isNoAbsenceDummy) return true;
+                  const key = `${getCanonicalStudentKey(e)}_${e.periodCode}`;
+                  if (seenPair.has(key)) return false;
+                  seenPair.add(key);
+                  return true;
+                });
 
-                  // Sort period codes for each student (ح1, ح2, ...)
-                  studentMap.forEach(item => {
-                    if (item.allPeriodCodes && item.allPeriodCodes.length > 1) {
-                      item.allPeriodCodes.sort((a: string, b: string) => {
-                        const numA = parseInt(getPeriodNum(a), 10) || 0;
-                        const numB = parseInt(getPeriodNum(b), 10) || 0;
-                        return numA - numB;
-                      });
-                    }
-                  });
+                // Sort display entries: First by Period (الحصة), Second by Class (الفصل), Third by Student Name (اسم الطالب)
+                displayEntries.sort((a: any, b: any) => {
+                  const pNumAStr = getPeriodNum(a.periodCode || a.period || "");
+                  const pNumBStr = getPeriodNum(b.periodCode || b.period || "");
+                  let periodA = (pNumAStr === "صباحي" || pNumAStr === "ص" || pNumAStr === "طابور" || a.isMorningDelay) ? 0 : parseInt(pNumAStr, 10);
+                  let periodB = (pNumBStr === "صباحي" || pNumBStr === "ص" || pNumBStr === "طابور" || b.isMorningDelay) ? 0 : parseInt(pNumBStr, 10);
+                  if (isNaN(periodA)) periodA = 999;
+                  if (isNaN(periodB)) periodB = 999;
 
-                  displayEntries = [...displayEntries, ...Array.from(studentMap.values())];
-                }
+                  if (periodA !== periodB) {
+                    return periodA - periodB;
+                  }
+
+                  const numAStr = getClassNum(a.classCode || "");
+                  const numBStr = getClassNum(b.classCode || "");
+                  let classA = parseInt(numAStr, 10);
+                  let classB = parseInt(numBStr, 10);
+
+                  if (isNaN(classA)) {
+                    const idx = classes.findIndex(c => c.id === a.classId);
+                    classA = idx !== -1 ? idx + 1 : 999;
+                  }
+                  if (isNaN(classB)) {
+                    const idx = classes.findIndex(c => c.id === b.classId);
+                    classB = idx !== -1 ? idx + 1 : 999;
+                  }
+
+                  if (classA !== classB) {
+                    return classA - classB;
+                  }
+
+                  return (a.studentName || "").localeCompare(b.studentName || "", "ar");
+                });
 
                 const gradeClasses = classes.filter(c => c.gradeId === grade.id);
                 // Unique students counts or total counts
@@ -3131,8 +3087,8 @@ export default function AdminPanel({
                               <th className="py-2 px-1 text-center w-6">#</th>
                               <th className="py-2 px-1 text-right font-black w-12">الوقت</th>
                               <th className="py-2 px-1.5 text-right font-black">اسم الطالب</th>
-                              <th className="py-2 px-0.5 text-center font-black">الحصة</th>
                               <th className="py-2 px-0.5 text-center font-black w-10">الفصل</th>
+                              <th className="py-2 px-0.5 text-center font-black">الحصة</th>
                               <th className="py-2 px-1 text-right font-black w-24">المعلم المعتمد</th>
                               {!isReadOnly && <th className="py-2 px-0.5 text-center w-8">⚙️</th>}
                             </tr>
@@ -3141,7 +3097,7 @@ export default function AdminPanel({
                             {displayEntries.length === 0 ? (
                               <tr>
                                 <td colSpan={isReadOnly ? 6 : 7} className="py-10 text-center text-slate-400 font-black">
-                                  <span className="underline decoration-dashed underline-offset-4 decoration-slate-300">لا يوجد غياب أو تأخر مسجل لهذا الصف اليوم 👍</span>
+                                  <span className="underline decoration-dashed underline-offset-4 decoration-slate-300">لا يوجد غياب مسجل لهذا الصف اليوم 👍</span>
                                 </td>
                               </tr>
                             ) : (
@@ -3208,12 +3164,17 @@ export default function AdminPanel({
                                       )}
                                     </div>
                                   </td>
+                                  {/* Class column before Period column */}
                                   <td className="py-1 px-0.5 text-center">
-                                    {entry.isNoAbsenceDummy ? (
-                                      <span className="text-slate-400 text-[9.5px]">-</span>
-                                    ) : (
-                                      <div className="flex items-center justify-center gap-0.5 flex-wrap">
-                                        {periodsToRender.map((pCode: string, pIdx: number) => (
+                                    <span className={`font-extrabold text-[9.5px] w-4.5 h-4.5 rounded flex items-center justify-center border shadow-3xs mx-auto ${getClassBadgeStyles(getClassNum(entry.classCode))}`} title="الفصل">
+                                      {getClassNum(entry.classCode)}
+                                    </span>
+                                  </td>
+                                  {/* Period column - visible even when no absence */}
+                                  <td className="py-1 px-0.5 text-center">
+                                    <div className="flex items-center justify-center gap-0.5 flex-wrap">
+                                      {periodsToRender && periodsToRender.length > 0 && periodsToRender.some((p: string) => Boolean(p)) ? (
+                                        periodsToRender.filter(Boolean).map((pCode: string, pIdx: number) => (
                                           <span 
                                             key={pIdx} 
                                             className={`font-extrabold text-[9.5px] w-4.5 h-4.5 rounded flex items-center justify-center border shadow-3xs ${getPeriodBadgeStyles(getPeriodNum(pCode))}`} 
@@ -3221,14 +3182,11 @@ export default function AdminPanel({
                                           >
                                             {getPeriodNum(pCode)}
                                           </span>
-                                        ))}
-                                      </div>
-                                    )}
-                                  </td>
-                                  <td className="py-1 px-0.5 text-center">
-                                    <span className={`font-extrabold text-[9.5px] w-4.5 h-4.5 rounded flex items-center justify-center border shadow-3xs mx-auto ${getClassBadgeStyles(getClassNum(entry.classCode))}`} title="الفصل">
-                                      {getClassNum(entry.classCode)}
-                                    </span>
+                                        ))
+                                      ) : (
+                                        <span className="text-slate-400 text-[9.5px]">-</span>
+                                      )}
+                                    </div>
                                   </td>
                                   <td className="py-1 px-1 text-slate-600 font-medium text-[9.5px] whitespace-nowrap truncate max-w-[100px]" title={entry.allTeachers ? entry.allTeachers.join("، ") : entry.teacherName}>
                                     {entry.allTeachers && entry.allTeachers.length > 1 
@@ -3267,7 +3225,7 @@ export default function AdminPanel({
                       <div className="block md:hidden divide-y divide-slate-100 p-2">
                         {displayEntries.length === 0 ? (
                           <div className="py-8 text-center text-slate-400 font-black text-xs">
-                            لا يوجد غياب أو تأخر مسجل لهذا الصف اليوم 👍
+                            لا يوجد غياب مسجل لهذا الصف اليوم 👍
                           </div>
                         ) : (
                           displayEntries.map((entry: any, index: number) => {
@@ -3339,14 +3297,14 @@ export default function AdminPanel({
 
                               <div className="mt-2 pt-2 border-t border-slate-200/50 flex flex-wrap items-center justify-between gap-1.5 text-[11px]">
                                 <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className={`font-black text-[10px] px-2 py-0.5 rounded-md border ${getClassBadgeStyles(getClassNum(entry.classCode))}`}>
+                                    فصل {getClassNum(entry.classCode)}
+                                  </span>
                                   {periodsToRender.map((pCode: string, pIdx: number) => (
                                     <span key={pIdx} className={`font-black text-[10px] px-2 py-0.5 rounded-md border ${getPeriodBadgeStyles(getPeriodNum(pCode))}`}>
                                       حصة {getPeriodNum(pCode)}
                                     </span>
                                   ))}
-                                  <span className={`font-black text-[10px] px-2 py-0.5 rounded-md border ${getClassBadgeStyles(getClassNum(entry.classCode))}`}>
-                                    فصل {getClassNum(entry.classCode)}
-                                  </span>
                                 </div>
 
                                 <div className="flex items-center gap-2 text-slate-500 font-bold text-[10px]">

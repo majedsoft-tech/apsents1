@@ -640,10 +640,27 @@ export default function MorningDelayPortal({
                                 <span>رصد...</span>
                               </span>
                             ) : isRecorded ? (
-                              <span className="inline-flex items-center justify-center gap-1.5 text-xs font-black text-amber-800 bg-amber-100 border border-amber-300 px-3 py-1.5 rounded-xl shadow-2xs min-w-[76px]">
-                                <span>متأخر</span>
-                                <span>⏳</span>
-                              </span>
+                              <div className="flex items-center gap-1.5 sm:gap-2">
+                                <span className="inline-flex items-center justify-center gap-1.5 text-xs font-black text-amber-800 bg-amber-100 border border-amber-300 px-3 py-1.5 rounded-xl shadow-2xs min-w-[76px]">
+                                  <span>متأخر</span>
+                                  <span>⏳</span>
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    const currentRec = rec || records.find(r => r.studentId === st.id);
+                                    if (currentRec) {
+                                      handleDeleteRecord(currentRec.id, st.name, currentRec.studentId || st.id, currentRec.date || selectedDate);
+                                    }
+                                  }}
+                                  className="inline-flex items-center justify-center gap-1 text-xs font-black text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 hover:border-rose-300 px-2.5 py-1.5 rounded-xl transition cursor-pointer shadow-3xs hover:shadow-xs active:scale-95"
+                                  title={`حذف تسجيل التأخر الصباحي لـ ${st.name}`}
+                                >
+                                  <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+                                  <span className="text-[11px] font-extrabold">حذف</span>
+                                </button>
+                              </div>
                             ) : (
                               <span className="inline-flex items-center justify-center gap-1 text-xs font-black text-slate-400 hover:text-amber-700 bg-slate-50 hover:bg-amber-50 border border-slate-200 hover:border-amber-300 px-3 py-1.5 rounded-xl transition min-w-[76px]">
                                 <span>+ تسجيل</span>
@@ -709,9 +726,28 @@ export default function MorningDelayPortal({
 
                           <div className="flex items-center justify-between text-[10px] font-bold text-slate-400 pt-1 border-t border-slate-200/50">
                             <span className="truncate">{isRecorded ? `السبب: ${rec?.reason || "تأخر"}` : "اضغط للرصد 👈"}</span>
-                            <span className={`font-black shrink-0 ${isRecorded ? "text-amber-700" : "text-amber-600"}`}>
-                              {isRecorded ? "متأخر" : "+ رصد"}
-                            </span>
+                            <div className="flex items-center gap-1 shrink-0">
+                              <span className={`font-black ${isRecorded ? "text-amber-700" : "text-amber-600"}`}>
+                                {isRecorded ? "متأخر" : "+ رصد"}
+                              </span>
+                              {isRecorded && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    const currentRec = rec || records.find(r => r.studentId === st.id);
+                                    if (currentRec) {
+                                      handleDeleteRecord(currentRec.id, st.name, currentRec.studentId || st.id, currentRec.date || selectedDate);
+                                    }
+                                  }}
+                                  className="p-1 text-rose-500 hover:text-rose-700 hover:bg-rose-100 bg-rose-50 border border-rose-200 rounded-lg transition cursor-pointer flex items-center gap-0.5 text-[9.5px] font-bold shadow-3xs"
+                                  title={`حذف تسجيل التأخر الصباحي لـ ${st.name}`}
+                                >
+                                  <Trash2 className="w-2.5 h-2.5 text-rose-500" />
+                                  <span>حذف</span>
+                                </button>
+                              )}
+                            </div>
                           </div>
                         </div>
                       );

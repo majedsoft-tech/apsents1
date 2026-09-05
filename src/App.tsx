@@ -14,6 +14,9 @@ import {
   subscribeToTeachers,
   subscribeToStudents,
   subscribeToSchoolName,
+  subscribeToAllAttendanceRecords,
+  subscribeToAllMorningDelayRecords,
+  subscribeToAllBehaviorRecords,
   registerUserInDb,
   setActiveUser,
   clearUserSessionState,
@@ -292,6 +295,9 @@ export default function App() {
       if (user) {
         setCurrentUser(user);
         setActiveUser(user);
+        try {
+          localStorage.setItem("last_active_school_owner", JSON.stringify({ uid: user.uid, email: user.email || "" }));
+        } catch (_) {}
         // Automatic background sync for authenticated user
         syncAllLocalDataToFirestore().catch(() => {});
       } else {
@@ -305,15 +311,39 @@ export default function App() {
           };
           setActiveUser(directUser);
           setCurrentUser(directUser);
+          try {
+            localStorage.setItem("last_active_school_owner", JSON.stringify({ uid: ownerParam, email: emailParam }));
+          } catch (_) {}
         } else {
-          setCurrentUser(null);
-          setActiveUser(null);
-          setGrades([]);
-          setClasses([]);
-          setTeachers([]);
-          setStudents([]);
-          setSchoolName("");
-          setTodayCounts({ absentCount: 0, behaviorCount: 0 });
+          let restoredUser: any = null;
+          try {
+            const raw = localStorage.getItem("last_active_school_owner");
+            if (raw) {
+              const parsed = JSON.parse(raw);
+              if (parsed && (parsed.uid || parsed.email)) {
+                restoredUser = {
+                  uid: parsed.uid || "",
+                  email: parsed.email || "",
+                  displayName: "المعلم / المشرف",
+                  isGuest: false
+                };
+              }
+            }
+          } catch (_) {}
+
+          if (restoredUser) {
+            setActiveUser(restoredUser);
+            setCurrentUser(restoredUser);
+          } else {
+            setCurrentUser(null);
+            setActiveUser(null);
+            setGrades([]);
+            setClasses([]);
+            setTeachers([]);
+            setStudents([]);
+            setSchoolName("");
+            setTodayCounts({ absentCount: 0, behaviorCount: 0 });
+          }
         }
       }
       setAuthChecking(false);
@@ -444,20 +474,71 @@ export default function App() {
         setStudents(deduplicateById(safeList));
       });
 
+      // 6. Real-time live subscriptions for Attendance, Delays, and Behaviors to keep counts and stats updated instantly across all tabs
+      let latestAttendance: any[] = [];
+      let latestDelays: any[] = [];
+      let latestBehaviors: any[] = [];
+
+      const computeLiveTodayCounts = () => {
+        const todayStr = new Date().toISOString().split("T")[0];
+        const absentStudentIds = new Set<string>();
+
+        latestAttendance.forEach((rec: any) => {
+          if (rec && rec.date === todayStr) {
+            if (Array.isArray(rec.absent)) {
+              rec.absent.forEach((sId: string) => {
+                if (sId && sId !== "no-absence") absentStudentIds.add(sId);
+              });
+            }
+          }
+        });
+
+        latestDelays.forEach((del: any) => {
+          if (del && del.date === todayStr && del.studentId) {
+            absentStudentIds.add(del.studentId);
+          }
+        });
+
+        const behaviorCount = latestBehaviors.filter((b: any) => b && b.date === todayStr).length;
+
+        setTodayCounts({
+          absentCount: absentStudentIds.size,
+          behaviorCount
+        });
+      };
+
+      const unsubAttendance = subscribeToAllAttendanceRecords((records) => {
+        latestAttendance = Array.isArray(records) ? records : [];
+        computeLiveTodayCounts();
+      });
+
+      const unsubDelays = subscribeToAllMorningDelayRecords((records) => {
+        latestDelays = Array.isArray(records) ? records : [];
+        computeLiveTodayCounts();
+      });
+
+      const unsubBehaviors = subscribeToAllBehaviorRecords((records) => {
+        latestBehaviors = Array.isArray(records) ? records : [];
+        computeLiveTodayCounts();
+      });
+
       // Turn off loading spinner quickly
       setTimeout(() => setLoading(false), 250);
+
+      return () => {
+        if (unsubSchool) (unsubSchool as () => void)();
+        if (unsubGrades) (unsubGrades as () => void)();
+        if (unsubClasses) (unsubClasses as () => void)();
+        if (unsubTeachers) (unsubTeachers as () => void)();
+        if (unsubStudents) (unsubStudents as () => void)();
+        if (unsubAttendance) (unsubAttendance as () => void)();
+        if (unsubDelays) (unsubDelays as () => void)();
+        if (unsubBehaviors) (unsubBehaviors as () => void)();
+      };
     } catch (err) {
       console.error("Error doing database subscriptions:", err);
       setLoading(false);
     }
-
-    return () => {
-      if (unsubSchool) (unsubSchool as () => void)();
-      if (unsubGrades) (unsubGrades as () => void)();
-      if (unsubClasses) (unsubClasses as () => void)();
-      if (unsubTeachers) (unsubTeachers as () => void)();
-      if (unsubStudents) (unsubStudents as () => void)();
-    };
   }, [currentUser]);
 
   const handleRefreshData = async () => {
