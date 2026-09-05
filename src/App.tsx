@@ -370,18 +370,17 @@ export default function App() {
     const localClasses = getLocalCollection<Class>("classes");
     const localTeachers = getLocalCollection<Teacher>("teachers");
     const localStudents = getLocalCollection<Student>("students");
-    if (localGrades.length > 0) setGrades(localGrades);
-    if (localClasses.length > 0) setClasses(localClasses);
-    if (localTeachers.length > 0) setTeachers(localTeachers);
-    if (localStudents.length > 0) setStudents(localStudents);
+    setGrades(localGrades);
+    setClasses(localClasses);
+    setTeachers(localTeachers);
+    setStudents(localStudents);
 
-    // Check cached school name for instantaneous presentation during loading
-    const cachedName = localStorage.getItem("school_name_cached") || 
-      (currentUser?.uid ? localStorage.getItem(`school_name_${currentUser.uid}`) : null) || 
-      (currentUser?.email ? localStorage.getItem(`school_name_${currentUser.email.toLowerCase()}`) : null);
-    if (cachedName) {
-      setSchoolName(cachedName);
-    }
+    // Check cached school name strictly scoped to current user email/uid
+    const userEmail = currentUser?.email?.toLowerCase().trim();
+    const userUid = currentUser?.uid;
+    const cachedName = (userEmail ? localStorage.getItem(`school_name_${userEmail}`) : null) || 
+      (userUid ? localStorage.getItem(`school_name_${userUid}`) : null);
+    setSchoolName(cachedName || "");
 
     setLoading(true);
 
@@ -396,9 +395,11 @@ export default function App() {
       unsubSchool = subscribeToSchoolName((newName) => {
         if (newName) {
           setSchoolName(newName);
-          localStorage.setItem("school_name_cached", newName);
           if (currentUser?.email) {
-            localStorage.setItem(`school_name_${currentUser.email.toLowerCase()}`, newName);
+            localStorage.setItem(`school_name_${currentUser.email.toLowerCase().trim()}`, newName);
+          }
+          if (currentUser?.uid) {
+            localStorage.setItem(`school_name_${currentUser.uid}`, newName);
           }
         } else {
           setSchoolName("");
@@ -1974,7 +1975,7 @@ export default function App() {
 
               <div className="bg-slate-100 border border-slate-300 rounded-xl p-2.5 flex items-center justify-between">
                 <code className="text-indigo-700 font-mono font-bold text-xs" dir="ltr">
-                  {typeof window !== "undefined" ? window.location.hostname : "apsents.majedsoft.workers.dev"}
+                  {typeof window !== "undefined" ? window.location.hostname : "school-attendance.vercel.app"}
                 </code>
                 <button
                   type="button"

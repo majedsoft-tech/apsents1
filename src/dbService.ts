@@ -113,24 +113,12 @@ export function getEffectiveUidAndEmail(): { uid: string; email: string; isGuest
       }
     } catch (e) {}
 
-    // Check localStorage cache for saved admin session or linked school
-    try {
-      const storedAdminId = localStorage.getItem("own_school_admin_id") || localStorage.getItem("linked_school_owner_id");
-      const storedEmail = localStorage.getItem("own_school_admin_email") || localStorage.getItem("linked_school_owner_email");
-      if (storedAdminId || storedEmail) {
-        return {
-          uid: storedAdminId || "school_admin",
-          email: storedEmail || "majedsoft@gmail.com",
-          isGuest: false
-        };
-      }
-    } catch (_) {}
   }
 
-  // Default to school instance context so guest teachers and supervisors can view and record data seamlessly
+  // Default to empty credentials for unauthenticated visitors
   return {
-    uid: "school_admin",
-    email: "majedsoft@gmail.com",
+    uid: "",
+    email: "",
     isGuest: true
   };
 }
@@ -183,38 +171,31 @@ function getLocalStorageKey(colName: string, uid?: string): string {
 function getLocalItems(colName: string, uid?: string): any[] {
   const eff = getEffectiveUidAndEmail();
   const currentUid = uid || eff.uid || "";
-  const currentEmail = eff.email?.toLowerCase() || "";
+  const currentEmail = (eff.email || "").toLowerCase().trim();
   if (typeof window === "undefined") return [];
-  try {
-    // 1. Check primary UID key
-    if (currentUid) {
-      const rawUser = localStorage.getItem(`school_offline_cache_${currentUid}_${colName}`);
-      if (rawUser) {
-        try {
-          const parsed = JSON.parse(rawUser);
-          if (Array.isArray(parsed)) return parsed;
-        } catch (_) {}
-      }
-    }
+  if (!currentUid && !currentEmail) return [];
 
-    // 2. Check primary Email key
+  try {
+    // 1. Check primary Email key (Highest priority for email isolation)
     if (currentEmail) {
       const rawEmail = localStorage.getItem(`school_offline_cache_${currentEmail}_${colName}`);
       if (rawEmail) {
         try {
           const parsed = JSON.parse(rawEmail);
-          if (Array.isArray(parsed)) return parsed;
+          if (Array.isArray(parsed)) return parsed.filter(i => isDocBelongingToUser(i, currentUid, currentEmail));
         } catch (_) {}
       }
     }
 
-    // 3. Check generic fallback key
-    const rawGeneric = localStorage.getItem(`school_offline_cache_${colName}`);
-    if (rawGeneric) {
-      try {
-        const parsed = JSON.parse(rawGeneric);
-        if (Array.isArray(parsed)) return parsed;
-      } catch (_) {}
+    // 2. Check primary UID key
+    if (currentUid) {
+      const rawUser = localStorage.getItem(`school_offline_cache_${currentUid}_${colName}`);
+      if (rawUser) {
+        try {
+          const parsed = JSON.parse(rawUser);
+          if (Array.isArray(parsed)) return parsed.filter(i => isDocBelongingToUser(i, currentUid, currentEmail));
+        } catch (_) {}
+      }
     }
 
     return [];
@@ -235,28 +216,19 @@ export function getLocalCollection<T = any>(colName: string, uid?: string): T[] 
 function setLocalItems(colName: string, items: any[], uid?: string) {
   const eff = getEffectiveUidAndEmail();
   const currentUid = uid || eff.uid || "";
-  const currentEmail = eff.email?.toLowerCase() || "";
-  if (typeof window === "undefined") return;
+  const currentEmail = (eff.email || "").toLowerCase().trim();
+  if (typeof window === "undefined" || (!currentUid && !currentEmail)) return;
+
   try {
-    const safeItems = Array.isArray(items) ? items : [];
+    // Only save items that strictly belong to the current user/email
+    const safeItems = (Array.isArray(items) ? items : []).filter(i => isDocBelongingToUser(i, currentUid, currentEmail));
     const json = JSON.stringify(safeItems);
 
-    if (currentUid) {
-      localStorage.setItem(`school_offline_cache_${currentUid}_${colName}`, json);
-    }
     if (currentEmail) {
       localStorage.setItem(`school_offline_cache_${currentEmail}_${colName}`, json);
     }
-    localStorage.setItem(`school_offline_cache_${colName}`, json);
-
-    // Synchronize or clean any secondary/legacy keys for this collection so stale data never resurrects
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (key && key.startsWith("school_offline_cache_") && key.endsWith(`_${colName}`)) {
-        try {
-          localStorage.setItem(key, json);
-        } catch (_) {}
-      }
+    if (currentUid) {
+      localStorage.setItem(`school_offline_cache_${currentUid}_${colName}`, json);
     }
   } catch (e) {}
 }
@@ -282,23 +254,26 @@ function removeLocalItem(colName: string, id: string, uid?: string) {
   try {
     const eff = getEffectiveUidAndEmail();
     const currentUid = uid || eff.uid || "";
+    const currentEmail = (eff.email || "").toLowerCase().trim();
+    if (!currentUid && !currentEmail) return;
 
-    // Purge the item from EVERY cache key in localStorage for this collection
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (key && key.startsWith("school_offline_cache_") && key.endsWith(`_${colName}`)) {
+    const keys = [
+      currentEmail ? `school_offline_cache_${currentEmail}_${colName}` : null,
+      currentUid ? `school_offline_cache_${currentUid}_${colName}` : null
+    ].filter(Boolean) as string[];
+
+    keys.forEach(key => {
+      const raw = localStorage.getItem(key);
+      if (raw) {
         try {
-          const raw = localStorage.getItem(key);
-          if (raw) {
-            const parsed = JSON.parse(raw);
-            if (Array.isArray(parsed)) {
-              const filtered = parsed.filter(i => i && i.id !== id && i._docId !== id && i._origId !== id);
-              localStorage.setItem(key, JSON.stringify(filtered));
-            }
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            const filtered = parsed.filter(i => i && i.id !== id && i._docId !== id && i._origId !== id);
+            localStorage.setItem(key, JSON.stringify(filtered));
           }
         } catch (_) {}
       }
-    }
+    });
 
     const currentItems = getLocalItems(colName, currentUid);
     const filtered = currentItems.filter(i => i && i.id !== id && i._docId !== id && i._origId !== id);
@@ -312,26 +287,29 @@ function removeLocalItemsBy(colName: string, predicate: (item: any) => boolean, 
   try {
     const eff = getEffectiveUidAndEmail();
     const currentUid = uid || eff.uid || "";
+    const currentEmail = (eff.email || "").toLowerCase().trim();
+    if (!currentUid && !currentEmail) return;
 
-    // Purge matching items from EVERY cache key in localStorage for this collection
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (key && key.startsWith("school_offline_cache_") && key.endsWith(`_${colName}`)) {
+    const keys = [
+      currentEmail ? `school_offline_cache_${currentEmail}_${colName}` : null,
+      currentUid ? `school_offline_cache_${currentUid}_${colName}` : null
+    ].filter(Boolean) as string[];
+
+    keys.forEach(key => {
+      const raw = localStorage.getItem(key);
+      if (raw) {
         try {
-          const raw = localStorage.getItem(key);
-          if (raw) {
-            const parsed = JSON.parse(raw);
-            if (Array.isArray(parsed)) {
-              const filtered = parsed.filter(i => i && !predicate(i));
-              localStorage.setItem(key, JSON.stringify(filtered));
-            }
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            const filtered = parsed.filter(i => !predicate(i));
+            localStorage.setItem(key, JSON.stringify(filtered));
           }
         } catch (_) {}
       }
-    }
+    });
 
     const currentItems = getLocalItems(colName, currentUid);
-    const filtered = currentItems.filter(i => i && !predicate(i));
+    const filtered = currentItems.filter(i => !predicate(i));
     setLocalItems(colName, filtered, currentUid);
     notifyCollectionSubscribers(colName, filtered);
   } catch (e) {}
@@ -360,7 +338,18 @@ if (typeof window !== "undefined" && typeof BroadcastChannel !== "undefined") {
     realTimeSyncChannel.onmessage = (event) => {
       const data = event.data;
       if (data && data.colName) {
-        notifyCollectionSubscribers(data.colName, data.items, true);
+        const eff = getEffectiveUidAndEmail();
+        const myEmail = (eff.email || "").toLowerCase().trim();
+        const myUid = (eff.uid || "").trim();
+        const msgEmail = (data.ownerEmail || "").toLowerCase().trim();
+        const msgUid = (data.ownerUid || "").trim();
+
+        // Enforce strict tenant isolation: only accept broadcasts if matching current email or UID
+        const isMatch = (myEmail && msgEmail && myEmail === msgEmail) || 
+                        (myUid && msgUid && myUid === msgUid);
+        if (isMatch) {
+          notifyCollectionSubscribers(data.colName, data.items, true);
+        }
       }
     };
   } catch (e) {}
@@ -373,7 +362,16 @@ if (typeof window !== "undefined") {
       const parts = e.key.split("_");
       const colName = parts[parts.length - 1];
       if (colName && collectionHubs.has(colName)) {
-        notifyCollectionSubscribers(colName, undefined, true);
+        const eff = getEffectiveUidAndEmail();
+        const currentUid = eff.uid;
+        const currentEmail = (eff.email || "").toLowerCase().trim();
+        if (!currentUid && !currentEmail) return;
+
+        const matchesUser = (currentEmail && e.key.includes(`_${currentEmail}_`)) || 
+                            (currentUid && e.key.includes(`_${currentUid}_`));
+        if (matchesUser) {
+          notifyCollectionSubscribers(colName, undefined, true);
+        }
       }
     }
   });
@@ -399,7 +397,7 @@ function notifyCollectionSubscribers(colName: string, items?: any[], fromBroadca
   if (!hub) return;
   const eff = getEffectiveUidAndEmail();
   const currentUid = eff.uid;
-  const currentEmail = eff.email;
+  const currentEmail = (eff.email || "").toLowerCase().trim();
   
   const rawList = Array.isArray(items) ? items : getLocalItems(colName, currentUid);
   const safeList = Array.isArray(rawList) ? rawList : [];
@@ -409,7 +407,7 @@ function notifyCollectionSubscribers(colName: string, items?: any[], fromBroadca
   hub.lastUpdated = Date.now();
 
   // If new items were received (e.g. from broadcast), update local storage cache too
-  if (Array.isArray(items) && currentUid) {
+  if (Array.isArray(items) && (currentUid || currentEmail)) {
     setLocalItems(colName, dataToBroadcast, currentUid);
   }
 
@@ -423,6 +421,8 @@ function notifyCollectionSubscribers(colName: string, items?: any[], fromBroadca
       realTimeSyncChannel.postMessage({
         colName,
         items: dataToBroadcast,
+        ownerEmail: currentEmail,
+        ownerUid: currentUid,
         timestamp: Date.now()
       });
     } catch (_) {}
@@ -430,11 +430,52 @@ function notifyCollectionSubscribers(colName: string, items?: any[], fromBroadca
 }
 
 // Helper to check if a document belongs to a specific user/school
-export function isDocBelongingToUser(data: any, _currentUid?: string, _currentEmail?: string): boolean {
+export function isDocBelongingToUser(data: any, currentUid?: string, currentEmail?: string): boolean {
   if (!data) return false;
-  // All records stored in Firestore apsents1 project belong to this school's unified deployment.
-  // Always returning true guarantees real-time synchronization between teachers, supervisors, and admin panel.
-  return true;
+
+  const eff = getEffectiveUidAndEmail();
+  const targetEmail = (currentEmail || eff.email || "").toLowerCase().trim();
+  const targetUid = (currentUid || eff.uid || "").trim();
+
+  // If no user context exists, no private user document should be accessible
+  if (!targetEmail && !targetUid) return false;
+
+  const docEmail = (data.userEmail || data.email || data.schoolEmail || "").toLowerCase().trim();
+  const docUid = (data.userId || data.uid || data.ownerId || "").trim();
+
+  // 1. Primary Rule: If target user has a registered email (strict email-first isolation)
+  if (targetEmail) {
+    // If the document has an associated email, it MUST strictly match targetEmail
+    if (docEmail) {
+      return targetEmail === docEmail;
+    }
+    // If document has no email recorded, fall back to matching UID (excluding generic placeholders)
+    if (docUid && targetUid && docUid === targetUid && docUid !== "school_admin") {
+      return true;
+    }
+    // Check alias cache
+    if (docUid && docUid !== "school_admin") {
+      const alias = userProfileAliasCache.get(targetEmail);
+      if (alias && alias.uid && alias.uid === docUid) return true;
+    }
+    return false;
+  }
+
+  // 2. Secondary Rule: If target user only has a UID (no email provided)
+  if (targetUid) {
+    // If the document has an email, verify if that email is mapped to this UID
+    if (docEmail) {
+      const alias = userProfileAliasCache.get(targetUid.toLowerCase());
+      if (alias && alias.email && alias.email.toLowerCase() === docEmail) return true;
+      return false;
+    }
+    // If neither has email, match UID strictly
+    if (docUid && docUid === targetUid && docUid !== "school_admin") {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 /**
@@ -458,6 +499,17 @@ export function clearUserSessionState(): void {
   collectionHubs.clear();
   userProfileAliasCache.clear();
   activeUserProxy = null;
+
+  if (typeof window !== "undefined") {
+    try {
+      localStorage.removeItem("school_name_cache");
+      localStorage.removeItem("school_name_cached");
+      localStorage.removeItem("own_school_admin_id");
+      localStorage.removeItem("own_school_admin_email");
+      localStorage.removeItem("linked_school_owner_id");
+      localStorage.removeItem("linked_school_owner_email");
+    } catch (_) {}
+  }
 }
 
 /**
@@ -772,9 +824,8 @@ export async function syncAllLocalDataToFirestore(): Promise<{ count: number; su
         if (!item || !item.id || seenIds.has(item.id)) return;
         seenIds.add(item.id);
         const itemBelongs = isDocBelongingToUser(item, uid, email);
-        const isOrphan = !item.userId && !item.userEmail;
 
-        if (itemBelongs || isOrphan) {
+        if (itemBelongs) {
           normalizedItems.push({
             ...item,
             userId: item.userId || uid,
@@ -892,16 +943,19 @@ export async function importSchoolBackupData(backupData: any): Promise<{ success
   }
 
   const eff = getEffectiveUidAndEmail();
-  const uid = eff.uid || "school_admin";
-  const email = eff.email || "majedsoft@gmail.com";
+  const uid = eff.uid || firebaseAuth.currentUser?.uid || "";
+  const email = (eff.email || firebaseAuth.currentUser?.email || "").toLowerCase().trim();
+
+  if (!uid && !email) {
+    return { success: false, message: "يرجى تسجيل الدخول بحساب المدرسة أولاً قبل استيراد النسخة الاحتياطية.", counts: {} };
+  }
 
   try {
     // 1. School Name
     if (backupData.schoolName) {
       if (typeof window !== "undefined") {
-        localStorage.setItem("school_name_cached", backupData.schoolName);
         if (uid) localStorage.setItem(`school_name_${uid}`, backupData.schoolName);
-        if (email) localStorage.setItem(`school_name_${email.toLowerCase()}`, backupData.schoolName);
+        if (email) localStorage.setItem(`school_name_${email}`, backupData.schoolName);
       }
       saveSchoolName(backupData.schoolName).catch(() => {});
     }
@@ -921,11 +975,11 @@ export async function importSchoolBackupData(backupData: any): Promise<{ success
     for (const item of collectionsToRestore) {
       const list = Array.isArray(backupData[item.key]) ? backupData[item.key] : [];
       if (list.length > 0) {
-        // Tag with active user credentials
+        // Tag strictly with active user credentials
         const tagged = list.map((docItem: any) => ({
           ...docItem,
-          userId: docItem.userId || uid,
-          userEmail: docItem.userEmail || email,
+          userId: uid,
+          userEmail: email,
           updatedAt: Date.now()
         }));
 
@@ -1054,8 +1108,12 @@ export async function updateAttendanceAbsenceExcuse(recordId: string, studentId:
 // Helper to fetch entire collection and filter client-side based on strict multi-tenant user isolation
 async function fetchAndFilterCollection(colName: string, force: boolean = false): Promise<any[]> {
   const eff = getEffectiveUidAndEmail();
-  const currentUid = eff.uid || "school_admin";
-  const currentEmail = eff.email || "majedsoft@gmail.com";
+  const currentUid = eff.uid || "";
+  const currentEmail = (eff.email || "").toLowerCase().trim();
+
+  if (!currentUid && !currentEmail) {
+    return [];
+  }
 
   // 1. Check in-memory collection hub first (unless forced refresh)
   const hub = collectionHubs.get(colName);
@@ -1091,7 +1149,6 @@ async function fetchAndFilterCollection(colName: string, force: boolean = false)
 
     // Update local cache and hub with authoritative Firestore data
     setLocalItems(colName, results, currentUid);
-    if (currentEmail) setLocalItems(colName, results, currentEmail);
     const targetHub = getCollectionHub(colName);
     targetHub.latestData = results;
     targetHub.lastUpdated = Date.now();
@@ -1217,8 +1274,8 @@ export function subscribeToAttendanceRecord(
 // Save Attendance Record (Instant local-first cache + real-time Firestore sync)
 export async function saveAttendanceRecord(record: Omit<AttendanceRecord, "id" | "timestamp">): Promise<void> {
   const eff = getEffectiveUidAndEmail();
-  let uid = eff.uid || (firebaseAuth.currentUser?.uid) || "school_admin";
-  let email = (eff.email || firebaseAuth.currentUser?.email || "majedsoft@gmail.com").toLowerCase();
+  let uid = eff.uid || (firebaseAuth.currentUser?.uid) || "";
+  let email = (eff.email || firebaseAuth.currentUser?.email || "").toLowerCase().trim();
   
   if (!email && uid) {
     const cached = userProfileAliasCache.get(uid.toLowerCase());
@@ -1247,11 +1304,10 @@ export async function saveAttendanceRecord(record: Omit<AttendanceRecord, "id" |
     }
   }
 
-  // Deterministic canonical ID per slot to guarantee 100% unified sync across all devices
+  // Deterministic canonical ID per slot scoped to tenant to guarantee 100% isolation across schools
+  const tenantPrefix = email ? email.replace(/[^a-zA-Z0-9]/g, '_') : (uid || "school");
   const normPeriod = normalizePeriodKey(record.period);
-  const sanitizedPeriod = (record.period || "1").replace(/\s+/g, '_');
-  const recordId = `att_${record.date}_p${normPeriod}_${record.gradeId}_${record.classId}`;
-  const legacyRecordId = `att_${record.date}_${sanitizedPeriod}_${record.gradeId}_${record.classId}`;
+  const recordId = `att_${tenantPrefix}_${record.date}_p${normPeriod}_${record.gradeId}_${record.classId}`;
 
   const fullRecord = {
     ...record,
@@ -1268,14 +1324,6 @@ export async function saveAttendanceRecord(record: Omit<AttendanceRecord, "id" |
   // 2. Persist to Firestore (safeguarded non-blocking timeout)
   const docRef = doc(db, ATTENDANCE_COLL, recordId);
   await safeFirestoreWrite(setDoc(docRef, fullRecord, { merge: true }), 250);
-
-  // If legacy ID differs, update it too for backward compatibility
-  if (legacyRecordId !== recordId) {
-    try {
-      const legacyRef = doc(db, ATTENDANCE_COLL, legacyRecordId);
-      await safeFirestoreWrite(setDoc(legacyRef, { ...fullRecord, id: legacyRecordId }, { merge: true }), 250);
-    } catch (_) {}
-  }
 }
 
 // Delete entire Attendance Record (Instant local update + real-time Firestore delete)
@@ -1799,6 +1847,7 @@ export async function addGradesBatch(names: string[]): Promise<{ id: string; nam
 export async function deleteGrade(id: string, gradeName?: string): Promise<void> {
   const eff = getEffectiveUidAndEmail();
   const uid = eff.uid;
+  const email = (eff.email || "").toLowerCase().trim();
 
   // 1. Determine grade name if not passed
   const localGrades = getLocalItems(GRADES_COLL, uid);
@@ -1842,6 +1891,7 @@ export async function deleteGrade(id: string, gradeName?: string): Promise<void>
       const gSnap = await getDocs(collection(db, GRADES_COLL));
       gSnap.forEach(docSnap => {
         const d = docSnap.data();
+        if (!isDocBelongingToUser(d, uid, email)) return;
         const matchId = docSnap.id === id || d.id === id;
         const matchName = resolvedGradeName && d.name?.trim() === resolvedGradeName;
         if (matchId || matchName) {
@@ -1856,6 +1906,7 @@ export async function deleteGrade(id: string, gradeName?: string): Promise<void>
       const cSnap = await getDocs(collection(db, CLASSES_COLL));
       cSnap.forEach(docSnap => {
         const d = docSnap.data();
+        if (!isDocBelongingToUser(d, uid, email)) return;
         const matchId = classIdsToDelete.has(docSnap.id) || classIdsToDelete.has(d.id);
         const matchGradeId = d.gradeId === id || (resolvedGradeName && (d.gradeId === resolvedGradeName || d.gradeName === resolvedGradeName));
         if (matchId || matchGradeId) {
@@ -1871,6 +1922,7 @@ export async function deleteGrade(id: string, gradeName?: string): Promise<void>
       const sSnap = await getDocs(collection(db, STUDENTS_COLL));
       sSnap.forEach(docSnap => {
         const d = docSnap.data();
+        if (!isDocBelongingToUser(d, uid, email)) return;
         const matchId = studentIdsToDelete.has(docSnap.id) || studentIdsToDelete.has(d.id);
         const matchGrade = d.gradeId === id || (resolvedGradeName && d.gradeName === resolvedGradeName);
         const matchClass = classIdsToDelete.has(d.classId);
@@ -1990,6 +2042,7 @@ export async function addClassesBatch(classesList: { name: string; gradeId: stri
 export async function deleteClass(id: string, gradeId?: string, className?: string): Promise<void> {
   const eff = getEffectiveUidAndEmail();
   const uid = eff.uid;
+  const email = (eff.email || "").toLowerCase().trim();
 
   // 1. Find class details from local cache
   const localClasses = getLocalItems(CLASSES_COLL, uid);
@@ -2008,7 +2061,7 @@ export async function deleteClass(id: string, gradeId?: string, className?: stri
   // 3. Purge from ALL local storage keys immediately (0ms)
   removeLocalItemsBy(CLASSES_COLL, (c) => 
     c.id === id || 
-    (c._docId && c._docId === id) ||
+    (c._docId && c._docId === id) || 
     (targetGradeId && targetClassName && (c.gradeId === targetGradeId || c.gradeName === targetGradeId) && c.name?.trim() === targetClassName),
     uid
   );
@@ -2028,6 +2081,7 @@ export async function deleteClass(id: string, gradeId?: string, className?: stri
       const cSnap = await getDocs(collection(db, CLASSES_COLL));
       cSnap.forEach(docSnap => {
         const d = docSnap.data();
+        if (!isDocBelongingToUser(d, uid, email)) return;
         const matchId = docSnap.id === id || d.id === id;
         const matchGradeAndName = targetGradeId && targetClassName && 
           (d.gradeId === targetGradeId || d.gradeName === targetGradeId) && 
@@ -2043,6 +2097,7 @@ export async function deleteClass(id: string, gradeId?: string, className?: stri
       const sSnap = await getDocs(collection(db, STUDENTS_COLL));
       sSnap.forEach(docSnap => {
         const d = docSnap.data();
+        if (!isDocBelongingToUser(d, uid, email)) return;
         const matchId = studentIdsToDelete.has(docSnap.id) || studentIdsToDelete.has(d.id) || d.classId === id;
         if (matchId) {
           batch.delete(docSnap.ref);
@@ -2063,6 +2118,7 @@ export async function deleteClass(id: string, gradeId?: string, className?: stri
 export async function deleteClassesForGrade(gradeId: string, gradeName?: string): Promise<void> {
   const eff = getEffectiveUidAndEmail();
   const uid = eff.uid;
+  const email = (eff.email || "").toLowerCase().trim();
   const resolvedGradeName = gradeName?.trim();
 
   // 1. Find all matching classes
@@ -2088,6 +2144,7 @@ export async function deleteClassesForGrade(gradeId: string, gradeName?: string)
     const snap = await getDocs(collection(db, CLASSES_COLL));
     snap.forEach(docSnap => {
       const d = docSnap.data();
+      if (!isDocBelongingToUser(d, uid, email)) return;
       if (classIds.has(docSnap.id) || classIds.has(d.id) || d.gradeId === gradeId || (resolvedGradeName && (d.gradeId === resolvedGradeName || d.gradeName === resolvedGradeName))) {
         batch.delete(docSnap.ref);
         count++;
@@ -2443,14 +2500,20 @@ export async function seedDatabaseIfEmpty(): Promise<boolean> {
 export async function getSchoolName(force: boolean = false): Promise<string> {
   const eff = getEffectiveUidAndEmail();
   const uid = eff.uid;
-  const email = eff.email;
+  const email = (eff.email || "").toLowerCase().trim();
   if (!uid && !email) {
     return "";
   }
   
   if (!force && typeof window !== "undefined") {
-    const localName = localStorage.getItem(`school_name_${uid}`);
-    if (localName) return localName;
+    if (email) {
+      const emailName = localStorage.getItem(`school_name_${email}`);
+      if (emailName) return emailName;
+    }
+    if (uid) {
+      const localName = localStorage.getItem(`school_name_${uid}`);
+      if (localName) return localName;
+    }
   }
 
   try {
@@ -2463,15 +2526,15 @@ export async function getSchoolName(force: boolean = false): Promise<string> {
       }
     });
     if (schoolNameVal && typeof window !== "undefined") {
-      if (uid) localStorage.setItem(`school_name_${uid}`, schoolNameVal);
       if (email) localStorage.setItem(`school_name_${email}`, schoolNameVal);
-      localStorage.setItem("school_name_cache", schoolNameVal);
+      if (uid) localStorage.setItem(`school_name_${uid}`, schoolNameVal);
     }
     return schoolNameVal;
   } catch (err: any) {
     handleFirestoreError(err);
     if (typeof window !== "undefined") {
-      return localStorage.getItem(`school_name_${uid}`) || "";
+      if (email) return localStorage.getItem(`school_name_${email}`) || "";
+      if (uid) return localStorage.getItem(`school_name_${uid}`) || "";
     }
   }
   return "";
@@ -2480,22 +2543,43 @@ export async function getSchoolName(force: boolean = false): Promise<string> {
 export async function saveSchoolName(schoolName: string): Promise<void> {
   const eff = getEffectiveUidAndEmail();
   const uid = eff.uid;
-  const email = eff.email;
+  const email = (eff.email || "").toLowerCase().trim();
   if (!uid && !email) return;
 
+  const trimmed = schoolName.trim();
+
   if (typeof window !== "undefined") {
-    localStorage.setItem(`school_name_${uid}`, schoolName);
+    if (email) localStorage.setItem(`school_name_${email}`, trimmed);
+    if (uid) localStorage.setItem(`school_name_${uid}`, trimmed);
   }
 
-  const docRef = doc(db, SETTINGS_COLL, `settings_${uid}`);
-  await safeFirestoreWrite(setDoc(docRef, { schoolName, userId: uid, userEmail: email, updatedAt: Date.now() }, { merge: true }), 200);
+  const docKey = email ? `settings_${email.replace(/[^a-zA-Z0-9]/g, '_')}` : `settings_${uid}`;
+  const docRef = doc(db, SETTINGS_COLL, docKey);
+  await safeFirestoreWrite(setDoc(docRef, { schoolName: trimmed, userId: uid, userEmail: email, updatedAt: Date.now() }, { merge: true }), 200);
+
+  if (uid && docKey !== `settings_${uid}`) {
+    const uidDocRef = doc(db, SETTINGS_COLL, `settings_${uid}`);
+    await safeFirestoreWrite(setDoc(uidDocRef, { schoolName: trimmed, userId: uid, userEmail: email, updatedAt: Date.now() }, { merge: true }), 200);
+  }
+
+  if (uid) {
+    try {
+      const userRef = doc(db, USERS_COLL, uid);
+      await setDoc(userRef, { schoolName: trimmed, lastLogin: Date.now() }, { merge: true });
+    } catch (_) {}
+  }
 }
 
 // Generic live subscription helper using collection multiplexing hub
 function subscribeToCollection(colName: string, callback: (data: any[]) => void, onError?: (error: any) => void) {
   const eff = getEffectiveUidAndEmail();
-  const currentUid = eff.uid || "school_admin";
-  const currentEmail = eff.email || "majedsoft@gmail.com";
+  const currentUid = eff.uid || "";
+  const currentEmail = (eff.email || "").toLowerCase().trim();
+
+  if (!currentUid && !currentEmail) {
+    callback([]);
+    return () => {};
+  }
 
   const hub = getCollectionHub(colName);
 
@@ -2512,7 +2596,7 @@ function subscribeToCollection(colName: string, callback: (data: any[]) => void,
   const rawLocal = getLocalItems(colName, currentUid);
   const safeLocal = Array.isArray(rawLocal) ? rawLocal.filter(item => isDocBelongingToUser(item, currentUid, currentEmail)) : [];
   const localList = Array.isArray(hub.latestData) && hub.latestData.length > 0 
-    ? hub.latestData 
+    ? hub.latestData.filter(item => isDocBelongingToUser(item, currentUid, currentEmail))
     : safeLocal;
   
   if (!Array.isArray(hub.latestData) || hub.latestData.length === 0) {
@@ -2528,8 +2612,15 @@ function subscribeToCollection(colName: string, callback: (data: any[]) => void,
       const q = collection(db, colName);
       hub.unsub = onSnapshot(q, (snapshot) => {
         const activeEff = getEffectiveUidAndEmail();
-        const activeUid = activeEff.uid || "school_admin";
-        const activeEmail = activeEff.email || "majedsoft@gmail.com";
+        const activeUid = activeEff.uid || "";
+        const activeEmail = (activeEff.email || "").toLowerCase().trim();
+
+        if (!activeUid && !activeEmail) {
+          hub.callbacks.forEach(cb => {
+            try { cb([]); } catch (_) {}
+          });
+          return;
+        }
 
         const results: any[] = [];
         const seenIds = new Set<string>();
@@ -2543,7 +2634,6 @@ function subscribeToCollection(colName: string, callback: (data: any[]) => void,
 
         // Update local storage cache with authoritative snapshot (including empty list)
         setLocalItems(colName, results, activeUid);
-        if (activeEmail) setLocalItems(colName, results, activeEmail);
         hub.latestData = results;
         hub.lastUpdated = Date.now();
 
@@ -2558,6 +2648,8 @@ function subscribeToCollection(colName: string, callback: (data: any[]) => void,
             realTimeSyncChannel.postMessage({
               colName,
               items: results,
+              ownerEmail: activeEmail,
+              ownerUid: activeUid,
               timestamp: Date.now()
             });
           } catch (_) {}
@@ -2649,7 +2741,7 @@ export function subscribeToStudents(callback: (students: Student[]) => void, onE
 export function subscribeToSchoolName(callback: (schoolName: string) => void, onError?: (error: any) => void) {
   const eff = getEffectiveUidAndEmail();
   const currentUid = eff.uid;
-  const currentEmail = eff.email;
+  const currentEmail = (eff.email || "").toLowerCase().trim();
 
   if (!currentUid && !currentEmail) {
     callback("");
@@ -2657,9 +2749,8 @@ export function subscribeToSchoolName(callback: (schoolName: string) => void, on
   }
 
   if (typeof window !== "undefined") {
-    const cached = (currentUid ? localStorage.getItem(`school_name_${currentUid}`) : null) || 
-      (currentEmail ? localStorage.getItem(`school_name_${currentEmail}`) : null) ||
-      localStorage.getItem("school_name_cache");
+    const cached = (currentEmail ? localStorage.getItem(`school_name_${currentEmail}`) : null) ||
+      (currentUid ? localStorage.getItem(`school_name_${currentUid}`) : null);
     if (cached) callback(cached);
   }
 
@@ -2671,9 +2762,8 @@ export function subscribeToSchoolName(callback: (schoolName: string) => void, on
       }
     });
     if (schoolNameVal && typeof window !== "undefined") {
-      if (currentUid) localStorage.setItem(`school_name_${currentUid}`, schoolNameVal);
       if (currentEmail) localStorage.setItem(`school_name_${currentEmail}`, schoolNameVal);
-      localStorage.setItem("school_name_cache", schoolNameVal);
+      if (currentUid) localStorage.setItem(`school_name_${currentUid}`, schoolNameVal);
     }
     callback(schoolNameVal || "");
   }, onError);
@@ -2690,8 +2780,8 @@ export async function registerUserInDb(
 ): Promise<void> {
   if (!user || !user.uid) return;
   const email = user.email?.toLowerCase() || "";
-  if (!email || email === "majedsoft@gmail.com" && user.displayName === "زائر عام") {
-    // Skip registering the guest general user
+  if (!email || user.displayName === "زائر عام") {
+    // Skip registering anonymous guest user
     return;
   }
 
@@ -2755,15 +2845,18 @@ export async function getRegisteredUsers(): Promise<RegisteredUser[]> {
       if (users.length === 0) {
         const eff = getEffectiveUidAndEmail();
         if (eff && eff.uid) {
+          const userSchoolName = (typeof window !== "undefined" 
+            ? ((eff.email ? localStorage.getItem(`school_name_${eff.email}`) : null) || localStorage.getItem(`school_name_${eff.uid}`)) 
+            : "") || "";
           users.push({
             id: eff.uid,
             uid: eff.uid,
-            email: eff.email || "school_admin@school.com",
+            email: eff.email || "",
             displayName: activeUserProxy?.displayName || "مدير المدرسة الحالي",
             photoURL: "",
             lastLogin: Date.now(),
             createdAt: Date.now(),
-            schoolName: (typeof window !== "undefined" ? (localStorage.getItem(`school_name_${eff.uid}`) || localStorage.getItem("school_name_cached")) : "") || "المدرسة الرئيسية",
+            schoolName: userSchoolName,
             status: "نشط"
           });
         }
@@ -2807,15 +2900,18 @@ export async function getRegisteredUsers(): Promise<RegisteredUser[]> {
     if (users.length === 0) {
       const eff = getEffectiveUidAndEmail();
       if (eff && eff.uid) {
+        const userSchoolName = (typeof window !== "undefined" 
+          ? ((eff.email ? localStorage.getItem(`school_name_${eff.email}`) : null) || localStorage.getItem(`school_name_${eff.uid}`)) 
+          : "") || "";
         users.push({
           id: eff.uid,
           uid: eff.uid,
-          email: eff.email || "school_admin@school.com",
+          email: eff.email || "",
           displayName: activeUserProxy?.displayName || "مدير المدرسة الحالي",
           photoURL: "",
           lastLogin: Date.now(),
           createdAt: Date.now(),
-          schoolName: localStorage.getItem(`school_name_${eff.uid}`) || localStorage.getItem("school_name_cached") || "المدرسة الرئيسية",
+          schoolName: userSchoolName,
           status: "نشط"
         });
       }

@@ -109,6 +109,24 @@ const getTodayFormattedArabic = () => {
   return `${weekday} ${year}/${month}/${day}`;
 };
 
+const getFormattedArabicDate = (dateStr?: string): string => {
+  if (!dateStr) return getTodayFormattedArabic();
+  try {
+    const parts = dateStr.trim().split("-");
+    if (parts.length === 3) {
+      const year = parseInt(parts[0], 10);
+      const month = parseInt(parts[1], 10) - 1;
+      const day = parseInt(parts[2], 10);
+      const d = new Date(year, month, day);
+      if (!isNaN(d.getTime())) {
+        const weekday = d.toLocaleDateString('ar-SA', { weekday: 'long' });
+        return `${weekday} ${year}/${String(month + 1).padStart(2, '0')}/${String(day).padStart(2, '0')}`;
+      }
+    }
+  } catch (_) {}
+  return dateStr;
+};
+
 const normalizeArabic = (str: string): string => {
   if (!str) return "";
   return str
@@ -161,6 +179,30 @@ const getPeriodNum = (code: string) => {
   if (norm.includes("سادس") || norm.includes("6")) return "6";
   if (norm.includes("سابع") || norm.includes("7")) return "7";
   return code;
+};
+
+const getPeriodCode = (p: string): string => {
+  if (!p) return "ح1";
+  const map: Record<string, string> = {
+    "الأولى": "ح1",
+    "الثانية": "ح2",
+    "الثالثة": "ح3",
+    "الرابعة": "ح4",
+    "الخامسة": "ح5",
+    "السادسة": "ح6",
+    "السابعة": "ح7",
+    "حصة 1": "ح1",
+    "حصة 2": "ح2",
+    "حصة 3": "ح3",
+    "حصة 4": "ح4",
+    "حصة 5": "ح5",
+    "حصة 6": "ح6",
+    "حصة 7": "ح7"
+  };
+  if (map[p]) return map[p];
+  const num = getPeriodNum(p);
+  if (num && num !== "صباحي" && !isNaN(parseInt(num, 10))) return `ح${num}`;
+  return p.startsWith("ح") ? p : `ح${p}`;
 };
 
 const getClassNum = (code: string) => {
@@ -277,6 +319,7 @@ export default function AdminPanel({
   const setActiveSubTab = propSetActiveSubTab !== undefined ? propSetActiveSubTab : setLocalActiveSubTab;
 
   const [activeStatsTab, setActiveStatsTab] = useState<"attendance" | "morning_delay" | "selected_attendance" | "student_report">("attendance");
+  const [selectedAttendanceDate, setSelectedAttendanceDate] = useState<string>(getTodayDateString());
   const [attendanceViewMode, setAttendanceViewMode] = useState<"list" | "grid">("list");
   const [attendanceGroupMode, setAttendanceGroupMode] = useState<"all" | "unique">("unique");
   const [hasNewBehavior, setHasNewBehavior] = useState<boolean>(false);
@@ -1006,7 +1049,8 @@ export default function AdminPanel({
     attendance: AttendanceRecord[], 
     behaviors: BehaviorRecord[], 
     delays: MorningDelayRecord[] = cachedDelaysRef.current,
-    isBehaviorsReady: boolean = true
+    isBehaviorsReady: boolean = true,
+    targetDateStr?: string
   ) => {
     try {
       const safeAttendance = Array.isArray(attendance) ? attendance : [];
@@ -1094,9 +1138,9 @@ export default function AdminPanel({
       // Sort combined logs by date descending
       recentLogs.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
 
-      // Calculate today stats
-      const TODAY_DATE = getTodayDateString();
-      const todayAttendance = safeAttendance.filter(rec => rec && rec.date === TODAY_DATE);
+      // Calculate attendance stats for the selected date only
+      const TARGET_DATE = (targetDateStr || selectedAttendanceDate || getTodayDateString()).trim();
+      const todayAttendance = safeAttendance.filter(rec => rec && rec.date && rec.date.trim() === TARGET_DATE);
 
       // Helper to extract numeric timestamp from BehaviorRecord for accurate sorting
       const getBehaviorTime = (b: BehaviorRecord): number => {
@@ -1144,7 +1188,7 @@ export default function AdminPanel({
       };
 
       const allBehaviorsList = sortedAllBehaviors.map(mapBehaviorRecord);
-      const todayBehaviorsList = sortedAllBehaviors.filter(b => b.date === TODAY_DATE).map(mapBehaviorRecord);
+      const todayBehaviorsList = sortedAllBehaviors.filter(b => b.date && b.date.trim() === TARGET_DATE).map(mapBehaviorRecord);
 
       setStats({
         totalAbsencesCount: totalAbsCount,
@@ -1156,11 +1200,16 @@ export default function AdminPanel({
         todayBehaviorsList
       });
 
-      // Absent today (unique student counts)
+      // Absent on selected date (unique student counts by canonical identity)
       const todayAbsentSet = new Set<string>();
       todayAttendance.forEach(rec => {
-        if (!rec.isNoAbsence && rec.absent) {
-          rec.absent.forEach(id => todayAbsentSet.add(id));
+        if (!rec.isNoAbsence && Array.isArray(rec.absent)) {
+          rec.absent.forEach(id => {
+            if (!id) return;
+            const studentObj = Array.isArray(students) ? students.find(s => s && (s.id === id || s.name === id)) : undefined;
+            const canonicalKey = studentObj ? `sid_${studentObj.id}` : `norm_${normalizeArabic(id).replace(/\s+/g, ' ').trim()}`;
+            if (canonicalKey) todayAbsentSet.add(canonicalKey);
+          });
         }
       });
       const absentCount = todayAbsentSet.size;
@@ -1525,9 +1574,9 @@ export default function AdminPanel({
         }
       });
 
-      // 4. Process Today's Morning Delays (التأخر الصباحي)
+      // 4. Process Morning Delays for the selected date (التأخر الصباحي)
       const safeDelays = Array.isArray(delays) ? delays : [];
-      const todayDelays = safeDelays.filter(d => d && d.date === TODAY_DATE);
+      const todayDelays = safeDelays.filter(d => d && d.date && d.date.trim() === TARGET_DATE);
 
       todayDelays.forEach(d => {
         const student = students.find(s => s && (s.id === d.studentId || s.name === d.studentId || s.id?.toLowerCase() === d.studentId?.toLowerCase()));
@@ -1736,7 +1785,7 @@ export default function AdminPanel({
     }
   };
 
-  // Load specific absence search results
+  // Load specific absence search results (deduplicated by student so no name is repeated)
   const loadSpecificAbsenceSearch = async (gId: string, cId: string, dateStr: string) => {
     if (!gId || !cId) {
       setSearchAttendanceResult([]);
@@ -1746,40 +1795,76 @@ export default function AdminPanel({
       const attendance = await getAllAttendanceRecords();
       const records = attendance.filter(rec => rec.gradeId === gId && rec.classId === cId && rec.date === dateStr);
       
-      const results: any[] = [];
+      const studentMap = new Map<string, any>();
       records.forEach(rec => {
         if (!rec.isNoAbsence) {
+          const pCode = getPeriodCode(rec.period);
+          const teacherName = teachers.find(t => t.id === rec.teacherId)?.name || (rec as any).teacherName || "معلم الحصة";
+
           (rec.absent || []).forEach(stId => {
             const student = students.find(s => s.id === stId || s.name === stId);
             const studentName = student?.name || (rec.studentNames && rec.studentNames[stId]) || stId;
-            results.push({
-              id: `${rec.id}-${stId}-abs`,
-              recordId: rec.id,
-              studentId: stId,
-              isAbsent: true,
-              studentName: studentName || "طالب غائب",
-              status: "غائب",
-              period: rec.period,
-              teacherName: teachers.find(t => t.id === rec.teacherId)?.name || "غير محدد"
-            });
+            const normName = normalizeArabic(studentName || "").replace(/\s+/g, ' ').trim();
+            const sKey = student ? `sid_${student.id}` : (normName ? `name_${normName}` : stId);
+
+            if (!studentMap.has(sKey)) {
+              studentMap.set(sKey, {
+                id: `${rec.id}-${stId}-abs`,
+                recordId: rec.id,
+                recordIds: [rec.id],
+                studentId: stId,
+                isAbsent: true,
+                isLate: false,
+                studentName: studentName || "طالب غائب",
+                status: "غائب",
+                periods: [pCode],
+                period: pCode,
+                teacherNames: [teacherName],
+                teacherName: teacherName
+              });
+            } else {
+              const existing = studentMap.get(sKey);
+              if (!existing.recordIds.includes(rec.id)) existing.recordIds.push(rec.id);
+              if (!existing.periods.includes(pCode)) existing.periods.push(pCode);
+              if (!existing.teacherNames.includes(teacherName)) existing.teacherNames.push(teacherName);
+              existing.period = existing.periods.join("، ");
+              existing.teacherName = existing.teacherNames.join("، ");
+            }
           });
+
           (rec.late || []).forEach(stId => {
             const student = students.find(s => s.id === stId || s.name === stId);
             const studentName = student?.name || (rec.studentNames && rec.studentNames[stId]) || stId;
-            results.push({
-              id: `${rec.id}-${stId}-late`,
-              recordId: rec.id,
-              studentId: stId,
-              isAbsent: false,
-              studentName: studentName || "طالب متأخر",
-              status: "متأخر",
-              period: rec.period,
-              teacherName: teachers.find(t => t.id === rec.teacherId)?.name || "غير محدد"
-            });
+            const normName = normalizeArabic(studentName || "").replace(/\s+/g, ' ').trim();
+            const sKey = student ? `sid_${student.id}` : (normName ? `name_${normName}` : stId);
+
+            if (!studentMap.has(sKey)) {
+              studentMap.set(sKey, {
+                id: `${rec.id}-${stId}-late`,
+                recordId: rec.id,
+                recordIds: [rec.id],
+                studentId: stId,
+                isAbsent: false,
+                isLate: true,
+                studentName: studentName || "طالب متأخر",
+                status: "متأخر",
+                periods: [pCode],
+                period: pCode,
+                teacherNames: [teacherName],
+                teacherName: teacherName
+              });
+            } else {
+              const existing = studentMap.get(sKey);
+              if (!existing.recordIds.includes(rec.id)) existing.recordIds.push(rec.id);
+              if (!existing.periods.includes(pCode)) existing.periods.push(pCode);
+              if (!existing.teacherNames.includes(teacherName)) existing.teacherNames.push(teacherName);
+              existing.period = existing.periods.join("، ");
+              existing.teacherName = existing.teacherNames.join("، ");
+            }
           });
         }
       });
-      setSearchAttendanceResult(results);
+      setSearchAttendanceResult(Array.from(studentMap.values()));
     } catch (e) {
       console.error("Error loading specific absence search:", e);
     }
@@ -1856,7 +1941,8 @@ export default function AdminPanel({
           cachedAttendanceRef.current, 
           cachedBehaviorsRef.current, 
           cachedDelaysRef.current, 
-          behaviorsReceivedRef.current
+          behaviorsReceivedRef.current,
+          selectedAttendanceDate
         );
         setStatsLoading(false);
       };
@@ -1901,17 +1987,18 @@ export default function AdminPanel({
     }
   }, [isAuthenticated, isReadOnly]);
 
-  // Re-compute stats when students, classes, grades, or activeSubTab change
+  // Re-compute stats when students, classes, grades, activeSubTab, or selectedAttendanceDate change
   useEffect(() => {
     if (isAuthenticated || isReadOnly) {
       computeStatistics(
         cachedAttendanceRef.current, 
         cachedBehaviorsRef.current, 
         cachedDelaysRef.current, 
-        behaviorsReceivedRef.current
+        behaviorsReceivedRef.current,
+        selectedAttendanceDate
       );
     }
-  }, [students, classes, grades, activeSubTab]);
+  }, [students, classes, grades, activeSubTab, selectedAttendanceDate]);
 
   // --- CRUD HANDLERS (Grades & Classes) ---
   const handleAddGradeSubmit = async (e: React.FormEvent) => {
@@ -2858,16 +2945,81 @@ export default function AdminPanel({
 
           {/* TAB CONTENT: DAILY ATTENDANCE (DYNAMIC COLUMNS / LIST FOR ALL GRADES) */}
           {activeStatsTab === "attendance" && (
-            <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4 items-start animate-fadeIn">
+            <div className="space-y-4 animate-fadeIn">
+              {/* Date Selector Filter Bar for Daily Attendance (Selected Day) */}
+              <div className="bg-white p-3 sm:p-3.5 rounded-2xl border border-slate-200/90 shadow-3xs flex flex-wrap items-center justify-between gap-3 print:hidden" dir="rtl">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs font-black text-slate-700 flex items-center gap-1.5">
+                    <span className="text-base">🗓️</span>
+                    <span>تاريخ عرض الغياب:</span>
+                  </span>
+                  <input
+                    type="date"
+                    value={selectedAttendanceDate}
+                    onChange={(e) => setSelectedAttendanceDate(e.target.value)}
+                    className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs font-black text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-3xs"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setSelectedAttendanceDate(getTodayDateString())}
+                    className={`text-[11px] font-black px-3 py-1.5 rounded-xl border transition cursor-pointer shadow-3xs ${
+                      selectedAttendanceDate === getTodayDateString()
+                        ? "bg-blue-600 text-white border-blue-600 shadow-xs"
+                        : "bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100"
+                    }`}
+                    title="الرجوع إلى تاريخ اليوم الحالي"
+                  >
+                    {selectedAttendanceDate === getTodayDateString() ? "✓ اليوم الحالي" : "الرجوع لليوم الحالي"}
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-2 text-xs flex-wrap">
+                  <span className="text-slate-500 font-bold">عرض غياب يوم:</span>
+                  <span className="bg-blue-50 text-blue-900 border border-blue-200/80 px-2.5 py-1 rounded-lg font-black shadow-3xs">
+                    {getFormattedArabicDate(selectedAttendanceDate)}
+                  </span>
+                  <span className="bg-rose-50 text-rose-700 border border-rose-200/80 px-2.5 py-1 rounded-lg font-black shadow-3xs">
+                    {todayStats.absentCount} طالب غائب
+                  </span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4 items-start">
               {grades.map(grade => {
                 const allGradeEntries = todayStats.entriesByGrade[grade.id] || [];
                 // Exclude morning delay entries from the attendance tab (only show classroom absences and class lates)
                 const rawGradeEntries = allGradeEntries.filter((e: any) => !e.isMorningDelay);
                 
+                // Helper to get robust canonical key for a student to prevent duplicate names
+                const getCanonicalStudentKey = (entry: any): string => {
+                  if (entry.isNoAbsenceDummy) return `no_abs_${entry.id || Math.random()}`;
+                  const rawName = (entry.studentName || "").trim();
+                  const normName = normalizeArabic(rawName).replace(/\s+/g, ' ');
+                  const rawId = (entry.studentId || "").trim();
+
+                  if (rawId) {
+                    const matchedById = students.find(s => s && (s.id === rawId || s.name === rawId));
+                    if (matchedById) return `sid_${matchedById.id}`;
+                  }
+                  if (normName) {
+                    const matchedByName = students.find(s => s && normalizeArabic(s.name || "").replace(/\s+/g, ' ') === normName);
+                    if (matchedByName) return `sid_${matchedByName.id}`;
+                  }
+                  if (normName) return `name_${normName}`;
+                  return rawId ? `raw_${rawId}` : `entry_${entry.id}`;
+                };
+
                 // Group by student if attendanceGroupMode === "unique" to prevent name repetition
                 let displayEntries: any[] = [];
                 if (attendanceGroupMode === "all") {
-                  displayEntries = rawGradeEntries;
+                  const seenPair = new Set<string>();
+                  displayEntries = rawGradeEntries.filter((e: any) => {
+                    if (e.isNoAbsenceDummy) return true;
+                    const key = `${getCanonicalStudentKey(e)}_${e.periodCode}`;
+                    if (seenPair.has(key)) return false;
+                    seenPair.add(key);
+                    return true;
+                  });
                 } else {
                   const studentMap = new Map<string, any>();
                   rawGradeEntries.forEach((entry: any) => {
@@ -2876,17 +3028,17 @@ export default function AdminPanel({
                       displayEntries.push(entry);
                       return;
                     }
-                    const sId = entry.studentId || entry.studentName;
-                    if (!studentMap.has(sId)) {
-                      studentMap.set(sId, {
+                    const sKey = getCanonicalStudentKey(entry);
+                    if (!studentMap.has(sKey)) {
+                      studentMap.set(sKey, {
                         ...entry,
-                        allPeriodCodes: [entry.periodCode],
-                        allTeachers: [entry.teacherName],
-                        recordIds: [entry.recordId],
+                        allPeriodCodes: entry.periodCode ? [entry.periodCode] : [],
+                        allTeachers: entry.teacherName ? [entry.teacherName] : [],
+                        recordIds: entry.recordId ? [entry.recordId] : [],
                         occurrences: 1
                       });
                     } else {
-                      const existing = studentMap.get(sId);
+                      const existing = studentMap.get(sKey);
                       if (entry.periodCode && !existing.allPeriodCodes.includes(entry.periodCode)) {
                         existing.allPeriodCodes.push(entry.periodCode);
                       }
@@ -2898,8 +3050,23 @@ export default function AdminPanel({
                       }
                       existing.occurrences += 1;
                       if (entry.isAbsent) existing.isAbsent = true;
+                      if ((entry.studentName?.length || 0) > (existing.studentName?.length || 0)) {
+                        existing.studentName = entry.studentName;
+                      }
                     }
                   });
+
+                  // Sort period codes for each student (ح1, ح2, ...)
+                  studentMap.forEach(item => {
+                    if (item.allPeriodCodes && item.allPeriodCodes.length > 1) {
+                      item.allPeriodCodes.sort((a: string, b: string) => {
+                        const numA = parseInt(getPeriodNum(a), 10) || 0;
+                        const numB = parseInt(getPeriodNum(b), 10) || 0;
+                        return numA - numB;
+                      });
+                    }
+                  });
+
                   displayEntries = [...displayEntries, ...Array.from(studentMap.values())];
                 }
 
@@ -2924,7 +3091,7 @@ export default function AdminPanel({
                           )}
                         </div>
                         <span className="bg-blue-700/90 text-white text-[10px] font-extrabold px-2 py-0.5 rounded-md">
-                          {getTodayFormattedArabic()}
+                          {getFormattedArabicDate(selectedAttendanceDate)}
                         </span>
                       </div>
 
@@ -3197,6 +3364,7 @@ export default function AdminPanel({
                   </div>
                 );
               })}
+              </div>
             </div>
           )}
 
