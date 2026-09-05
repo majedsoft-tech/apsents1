@@ -1644,7 +1644,7 @@ export default function App() {
   const hasTeachers = teachers.length > 0;
 
   return (
-    <div className="min-h-screen flex bg-gradient-to-br from-slate-100 via-blue-50/10 to-slate-200/40 font-sans text-slate-800" dir="rtl">
+    <div className="min-h-screen flex flex-col md:flex-row w-full max-w-full overflow-x-hidden bg-gradient-to-br from-slate-100 via-blue-50/10 to-slate-200/40 font-sans text-slate-800" dir="rtl">
       
       {/* 1. PERMANENT FIXED RIGHT SIDEBAR FOR DESKTOP & TABLETS (≥768px) */}
       {showSidebar && (
@@ -1654,7 +1654,7 @@ export default function App() {
       )}
 
       {/* 2. MAIN APP SECTION */}
-      <div className={`flex-1 min-h-screen flex flex-col bg-gradient-to-b from-blue-50/40 via-slate-50 to-slate-100/60 ${showSidebar ? "md:mr-72" : ""}`}>
+      <div className={`flex-1 min-h-screen flex flex-col w-full max-w-full min-w-0 bg-gradient-to-b from-blue-50/40 via-slate-50 to-slate-100/60 ${showSidebar ? "md:mr-72" : ""}`}>
         
         {/* Top Header for Mobile (< 768px) - Exact match to user's native mobile app screenshot */}
         {showMobileHeader && (
@@ -1700,7 +1700,7 @@ export default function App() {
         )}
 
         {/* Dynamic Inner Portal Content */}
-        <main className="flex-1 w-full max-w-none px-3 md:px-6 py-4 pb-28 md:pb-8 space-y-4">
+        <main className="flex-1 w-full max-w-full min-w-0 px-2.5 sm:px-4 md:px-6 py-3 sm:py-4 pb-28 md:pb-8 space-y-3 sm:space-y-4">
           {/* Registration Mandatory Notice Banner */}
           {!isDirectKiosk && (!currentUser || currentUser?.isGuest) && (
             <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white rounded-2xl p-4 sm:p-5 shadow-md flex flex-col sm:flex-row items-center justify-between gap-4 border border-indigo-700/50 animate-in fade-in">
@@ -1737,7 +1737,7 @@ export default function App() {
           )}
 
           {/* Active View Container */}
-          <div id="active-portal-view">
+          <div id="active-portal-view" className="w-full max-w-full min-w-0">
             {appMode === "super-admin" ? (
               <SuperAdminPanel
                 currentUser={currentUser}
