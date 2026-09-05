@@ -330,24 +330,24 @@ export default function MorningDelayPortal({
       )}
 
       {/* 1. PORTAL HERO HEADER (Matching screenshot layout with morning delay amber/warm palette) */}
-      <div className="text-center relative bg-gradient-to-r from-amber-950 via-amber-900 to-amber-950 text-white rounded-2xl md:rounded-3xl p-5 md:p-6 shadow-md overflow-hidden border border-amber-900/60">
+      <div className="text-center relative bg-gradient-to-r from-amber-950 via-amber-900 to-amber-950 text-white rounded-xl sm:rounded-2xl md:rounded-3xl p-4 sm:p-5 md:p-6 shadow-md overflow-hidden border border-amber-900/60">
         {/* Subtle decorative background circles */}
         <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full -mr-10 -mt-10 pointer-events-none"></div>
         <div className="absolute bottom-0 left-0 w-32 h-32 bg-amber-400/10 rounded-full -ml-10 -mb-10 pointer-events-none"></div>
         
         {/* Main School Name (Bold, Golden/Amber Yellow) */}
-        <h1 className="text-xl sm:text-2xl md:text-3xl font-black text-amber-300 mb-1 tracking-wide">
+        <h1 className="text-lg sm:text-2xl md:text-3xl font-black text-amber-300 mb-1 tracking-wide">
           {schoolName || "ام الحمام الثانوية"}
         </h1>
 
         {/* Subtitle with icon */}
-        <div className="flex items-center justify-center gap-1.5 text-amber-100 font-bold text-xs md:text-sm mb-3">
+        <div className="flex items-center justify-center gap-1.5 text-amber-100 font-bold text-[11px] sm:text-xs md:text-sm mb-2 sm:mb-3">
           <span>نظام تسجيل التأخر الصباحي</span>
           <span>⏰</span>
         </div>
 
         {/* Date Pill / Badge (Centered pill matching screenshot) */}
-        <div className="inline-flex items-center gap-2 bg-black/25 hover:bg-black/35 backdrop-blur-md text-white font-bold px-3.5 sm:px-4 py-1.5 rounded-full text-xs md:text-sm border border-white/15 shadow-inner transition-all">
+        <div className="inline-flex items-center gap-1.5 sm:gap-2 bg-black/25 hover:bg-black/35 backdrop-blur-md text-white font-bold px-2.5 sm:px-4 py-1 sm:py-1.5 rounded-full text-[11px] sm:text-xs md:text-sm border border-white/15 shadow-inner transition-all">
           <button
             type="button"
             onClick={() => handleDateShift(1)}
@@ -391,21 +391,21 @@ export default function MorningDelayPortal({
       </div>
 
       {/* 2. INDEPENDENT STICKY GRADE & CLASS SELECTION PANEL (مستقل ومثبت في أعلى الصفحة عند التمرير) */}
-      <div className="sticky top-14 md:top-16 z-30 bg-white/95 backdrop-blur-md p-3.5 sm:p-4 rounded-2xl md:rounded-3xl border-2 border-indigo-500/80 shadow-md space-y-3 transition-all">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
+      <div className="sticky top-14 md:top-16 z-30 bg-white/95 backdrop-blur-md p-2.5 sm:p-4 rounded-xl sm:rounded-2xl md:rounded-3xl border sm:border-2 border-indigo-500/80 shadow-md space-y-2 sm:space-y-3 transition-all">
+        <div className="flex flex-wrap items-center justify-between gap-1.5">
+          <div className="flex items-center gap-1.5 sm:gap-2">
             <label className="text-xs sm:text-sm font-black text-slate-800">الصف والفصل</label>
-            <span className="text-[10px] font-black text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-full">
+            <span className="text-[9px] sm:text-[10px] font-black text-indigo-700 bg-indigo-50 border border-indigo-200 px-1.5 sm:px-2 py-0.5 rounded-full">
               📌 مثبت أثناء التمرير
             </span>
           </div>
-          <span className="text-[11px] text-slate-500 font-bold">
+          <span className="text-[10px] sm:text-[11px] text-slate-500 font-bold">
             عدد طلاب الفصل: <strong className="text-indigo-700 font-black">{classStudents.length}</strong> طالب
           </span>
         </div>
 
         {/* Grade Select Row */}
-        <div className="flex items-center gap-2 overflow-x-auto pb-1 flex-wrap scrollbar-none">
+        <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto pb-1 flex-wrap scrollbar-none">
           {sortedGrades.map((g, idx) => {
             const isSelected = selectedGradeId === g.id;
             const gradeShortName = g.name.replace(/^الصف\s+/, "").replace(/^صف\s+/, "");
@@ -420,7 +420,7 @@ export default function MorningDelayPortal({
                     setSelectedClassId(gradeClasses[0].id);
                   }
                 }}
-                className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs sm:text-sm font-black border transition-all cursor-pointer shadow-3xs hover:shadow-md hover:scale-[1.02] active:scale-95 ${
+                className={`flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3.5 py-1 sm:py-1.5 rounded-lg sm:rounded-xl text-[11px] sm:text-xs md:text-sm font-black border transition-all cursor-pointer shadow-3xs hover:shadow-md hover:scale-[1.02] active:scale-95 ${
                   isSelected
                     ? "bg-[#5046e5] text-white border-[#5046e5] shadow-sm shadow-indigo-500/20"
                     : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
@@ -438,7 +438,7 @@ export default function MorningDelayPortal({
 
         {/* Class Select Row (Separate Line, Pills) */}
         {selectedGradeId && (
-          <div className="flex items-center gap-2 overflow-x-auto pb-1 flex-wrap scrollbar-none pt-1 border-t border-slate-100">
+          <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto pb-1 flex-wrap scrollbar-none pt-1 border-t border-slate-100">
             {filteredClasses.map((c, idx) => {
               const isSelected = selectedClassId === c.id;
               const classNum = c.name.replace(/^الفصل\s*/, "").replace(/^فصل\s*/, "").trim();
@@ -447,7 +447,7 @@ export default function MorningDelayPortal({
                   key={`${c.id}-${idx}`}
                   type="button"
                   onClick={() => setSelectedClassId(c.id)}
-                  className={`flex items-center justify-center min-w-[40px] px-3.5 py-1.5 rounded-xl text-xs sm:text-sm font-black border transition-all duration-150 cursor-pointer shadow-3xs hover:shadow-md hover:scale-[1.03] active:scale-95 ${
+                  className={`flex items-center justify-center min-w-[34px] sm:min-w-[40px] px-2.5 sm:px-3.5 py-1 sm:py-1.5 rounded-lg sm:rounded-xl text-[11px] sm:text-xs md:text-sm font-black border transition-all duration-150 cursor-pointer shadow-3xs hover:shadow-md hover:scale-[1.03] active:scale-95 ${
                     isSelected
                       ? "bg-[#5046e5] text-white border-[#5046e5] shadow-sm shadow-indigo-500/20"
                       : "bg-white text-indigo-600 border-indigo-200 hover:bg-indigo-50/70"
@@ -465,28 +465,28 @@ export default function MorningDelayPortal({
       </div>
 
       {/* 3. STUDENTS LIST CARD (منفصلة ومستقلة) */}
-      <div className="bg-white rounded-3xl border border-slate-200/90 shadow-sm p-4 md:p-6 space-y-4">
+      <div className="bg-white rounded-2xl sm:rounded-3xl border border-slate-200/90 shadow-sm p-3 sm:p-4 md:p-6 space-y-3 sm:space-y-4">
         {/* CLASS-BASED REGISTRATION */}
-        <div className="space-y-4">
+        <div className="space-y-3 sm:space-y-4">
             {/* Students Display Area */}
             {classStudents.length === 0 ? (
               <div className="text-center py-8 bg-slate-50 border border-dashed border-slate-200 rounded-2xl text-slate-400 text-xs font-bold">
                 لا يوجد طلاب مسجلين في هذا الفصل حالياً
               </div>
             ) : (
-              <div className="space-y-0 rounded-2xl border border-slate-200/90 overflow-hidden shadow-xs">
+              <div className="space-y-0 rounded-xl sm:rounded-2xl border border-slate-200/90 overflow-hidden shadow-xs">
                 {/* List Sub-Header matching Teacher Attendance List */}
-                <div className="bg-slate-50/80 border-b border-slate-200/90 px-4 py-3 flex flex-wrap gap-3 justify-between items-center text-right">
+                <div className="bg-slate-50/80 border-b border-slate-200/90 px-3 py-2 sm:px-4 sm:py-3 flex flex-wrap gap-2 sm:gap-3 justify-between items-center text-right">
                   <div className="flex flex-col gap-0.5">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1.5 sm:gap-2">
                       <span className="text-xs font-black text-slate-800">قائمة طلاب الفصل ({classStudents.length})</span>
                       {classStudents.filter(st => records.some(r => r.studentId === st.id)).length > 0 && (
-                        <span className="text-[10px] font-black bg-amber-500 text-white px-2 py-0.5 rounded-full shadow-3xs">
+                        <span className="text-[9px] sm:text-[10px] font-black bg-amber-500 text-white px-2 py-0.5 rounded-full shadow-3xs">
                           {classStudents.filter(st => records.some(r => r.studentId === st.id)).length} متأخر اليوم
                         </span>
                       )}
                     </div>
-                    <span className="text-[10px] font-bold text-slate-400">اضغط على اسم الطالب للرصد المباشر للتأخر الصباحي</span>
+                    <span className="text-[9px] sm:text-[10px] font-bold text-slate-400">اضغط على اسم الطالب للرصد المباشر للتأخر الصباحي</span>
                   </div>
 
                   {/* View Mode Switcher (List vs Grid) */}
@@ -494,7 +494,7 @@ export default function MorningDelayPortal({
                     <button
                       type="button"
                       onClick={() => setClassViewMode("list")}
-                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer ${
+                      className={`px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-lg text-[11px] sm:text-xs font-bold transition flex items-center gap-1 cursor-pointer ${
                         classViewMode === "list"
                           ? "bg-amber-500 text-white shadow-xs"
                           : "text-slate-500 hover:text-slate-800"
@@ -507,7 +507,7 @@ export default function MorningDelayPortal({
                     <button
                       type="button"
                       onClick={() => setClassViewMode("grid")}
-                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer ${
+                      className={`px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-lg text-[11px] sm:text-xs font-bold transition flex items-center gap-1 cursor-pointer ${
                         classViewMode === "grid"
                           ? "bg-amber-500 text-white shadow-xs"
                           : "text-slate-500 hover:text-slate-800"
@@ -542,58 +542,94 @@ export default function MorningDelayPortal({
                               handleRecordStudent(st);
                             }
                           }}
-                          className={`flex items-center justify-between px-3 sm:px-4 py-3 min-h-[48px] w-full max-w-full cursor-pointer transition select-none active:scale-[0.99] active:bg-slate-100/80 ${
+                          className={`p-2.5 sm:px-4 sm:py-3 w-full max-w-full cursor-pointer transition select-none active:scale-[0.99] active:bg-slate-100/80 ${
                             isRecorded ? "bg-amber-50/70 hover:bg-amber-100/60" : "bg-white hover:bg-slate-50"
                           }`}
                         >
-                          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 flex-1 pl-2">
-                            <span className={`text-xs font-black w-7 h-7 flex items-center justify-center rounded-full shrink-0 ${
-                              isRecorded ? "bg-amber-500 text-white shadow-3xs" : "bg-slate-100 text-slate-700"
-                            }`}>
-                              {idx + 1}
-                            </span>
-                            <span className="text-xs sm:text-sm font-bold text-slate-800 truncate block">
-                              {st.name}
-                            </span>
+                          {/* Primary line: Student index, name, and action / desktop badges */}
+                          <div className="flex items-center justify-between gap-2 min-w-0">
+                            <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
+                              <span className={`text-[11px] sm:text-xs font-black w-6 h-6 sm:w-7 sm:h-7 flex items-center justify-center rounded-full shrink-0 ${
+                                isRecorded ? "bg-amber-500 text-white shadow-3xs" : "bg-slate-100 text-slate-700"
+                              }`}>
+                                {idx + 1}
+                              </span>
+                              <span className="text-xs sm:text-sm font-bold text-slate-800 truncate block">
+                                {st.name}
+                              </span>
+                            </div>
+
+                            {/* Status or Action indicator */}
+                            <div className="shrink-0 transition-all duration-150 flex items-center">
+                              {isSaving ? (
+                                <span className="inline-flex items-center justify-center gap-1 text-[11px] sm:text-xs font-bold text-amber-700 bg-amber-100 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg sm:rounded-xl animate-pulse">
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                  <span>رصد...</span>
+                                </span>
+                              ) : isRecorded ? (
+                                /* Desktop single-line badges (hidden on mobile) */
+                                <div className="hidden sm:flex items-center gap-1.5 sm:gap-2">
+                                  <span className="inline-flex items-center justify-center gap-1.5 text-xs font-black text-amber-900 bg-amber-100 border border-amber-300 px-2.5 sm:px-3 py-1.5 rounded-xl shadow-2xs">
+                                    <span>متأخر</span>
+                                    <span className="inline-flex items-center gap-1 text-[11px] font-black bg-amber-200/90 text-amber-950 px-1.5 py-0.5 rounded-md border border-amber-300/80 shadow-3xs" title="وقت تسجيل التأخر">
+                                      <Clock className="w-3 h-3 text-amber-800 shrink-0" />
+                                      <span dir="ltr">{rec?.arrivalTime || arrivalTime || "07:30"}</span>
+                                    </span>
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      const currentRec = rec || records.find(r => r.studentId === st.id);
+                                      if (currentRec) {
+                                        handleDeleteRecord(currentRec.id, st.name, currentRec.studentId || st.id, currentRec.date || selectedDate);
+                                      }
+                                    }}
+                                    className="inline-flex items-center justify-center gap-1 text-xs font-black text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 hover:border-rose-300 px-2.5 py-1.5 rounded-xl transition cursor-pointer shadow-3xs hover:shadow-xs active:scale-95"
+                                    title={`حذف تسجيل التأخر الصباحي لـ ${st.name}`}
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+                                    <span className="text-[11px] font-extrabold">حذف</span>
+                                  </button>
+                                </div>
+                              ) : (
+                                <span className="inline-flex items-center justify-center gap-1 text-[11px] sm:text-xs font-black text-slate-500 hover:text-amber-700 bg-slate-100 hover:bg-amber-50 border border-slate-200 hover:border-amber-300 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg sm:rounded-xl transition">
+                                  <span>+ تسجيل</span>
+                                </span>
+                              )}
+                            </div>
                           </div>
 
-                          <div className="shrink-0 transition-all duration-150 flex items-center">
-                            {isSaving ? (
-                              <span className="inline-flex items-center justify-center gap-1 text-xs font-bold text-amber-700 bg-amber-100 px-3 py-1.5 rounded-xl animate-pulse min-w-[76px]">
-                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                <span>رصد...</span>
-                              </span>
-                            ) : isRecorded ? (
-                              <div className="flex items-center gap-1.5 sm:gap-2">
-                                <span className="inline-flex items-center justify-center gap-1.5 text-xs font-black text-amber-900 bg-amber-100 border border-amber-300 px-2.5 sm:px-3 py-1.5 rounded-xl shadow-2xs">
-                                  <span>متأخر</span>
-                                  <span className="inline-flex items-center gap-1 text-[11px] font-black bg-amber-200/90 text-amber-950 px-1.5 py-0.5 rounded-md border border-amber-300/80 shadow-3xs" title="وقت تسجيل التأخر">
-                                    <Clock className="w-3 h-3 text-amber-800 shrink-0" />
-                                    <span dir="ltr">{rec?.arrivalTime || arrivalTime || "07:30"}</span>
-                                  </span>
+                          {/* Mobile second line for recorded student (عرض بيانات التسجيل والوقت والحذف في سطر مخصص للجوال) */}
+                          {isRecorded && !isSaving && (
+                            <div className="flex sm:hidden items-center justify-between gap-2 mt-2 mr-8 pt-1.5 border-t border-amber-200/60">
+                              <div className="inline-flex items-center gap-1.5">
+                                <span className="text-[10px] font-black text-amber-900 bg-amber-200/90 border border-amber-300 px-2 py-0.5 rounded-md shadow-3xs">
+                                  متأخر
                                 </span>
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    const currentRec = rec || records.find(r => r.studentId === st.id);
-                                    if (currentRec) {
-                                      handleDeleteRecord(currentRec.id, st.name, currentRec.studentId || st.id, currentRec.date || selectedDate);
-                                    }
-                                  }}
-                                  className="inline-flex items-center justify-center gap-1 text-xs font-black text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 hover:border-rose-300 px-2.5 py-1.5 rounded-xl transition cursor-pointer shadow-3xs hover:shadow-xs active:scale-95"
-                                  title={`حذف تسجيل التأخر الصباحي لـ ${st.name}`}
-                                >
-                                  <Trash2 className="w-3.5 h-3.5 text-rose-500" />
-                                  <span className="text-[11px] font-extrabold">حذف</span>
-                                </button>
+                                <span className="inline-flex items-center gap-1 text-[10px] font-black bg-amber-100 text-amber-950 px-1.5 py-0.5 rounded-md border border-amber-300/70 shadow-3xs" dir="ltr" title="وقت تسجيل التأخر">
+                                  <Clock className="w-2.5 h-2.5 text-amber-800 shrink-0" />
+                                  <span>{rec?.arrivalTime || arrivalTime || "07:30"}</span>
+                                </span>
                               </div>
-                            ) : (
-                              <span className="inline-flex items-center justify-center gap-1 text-xs font-black text-slate-400 hover:text-amber-700 bg-slate-50 hover:bg-amber-50 border border-slate-200 hover:border-amber-300 px-3 py-1.5 rounded-xl transition min-w-[76px]">
-                                <span>+ تسجيل</span>
-                              </span>
-                            )}
-                          </div>
+
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const currentRec = rec || records.find(r => r.studentId === st.id);
+                                  if (currentRec) {
+                                    handleDeleteRecord(currentRec.id, st.name, currentRec.studentId || st.id, currentRec.date || selectedDate);
+                                  }
+                                }}
+                                className="inline-flex items-center justify-center gap-1 text-[10px] font-black text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 px-2.5 py-0.5 rounded-md transition cursor-pointer shadow-3xs active:scale-95"
+                                title={`حذف تسجيل التأخر الصباحي لـ ${st.name}`}
+                              >
+                                <Trash2 className="w-3 h-3 text-rose-500" />
+                                <span>حذف</span>
+                              </button>
+                            </div>
+                          )}
                         </div>
                       );
                     })}
