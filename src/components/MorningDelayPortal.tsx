@@ -14,9 +14,6 @@ import {
   Search, 
   Plus, 
   Trash2, 
-  Check, 
-  Copy, 
-  Printer, 
   AlertCircle, 
   ChevronRight, 
   ChevronLeft, 
@@ -27,13 +24,10 @@ import {
   User, 
   Building2, 
   Layers, 
-  Share2, 
-  Filter, 
   Loader2, 
   SunMedium, 
   ArrowRight,
   HelpCircle,
-  FileSpreadsheet,
   List,
   LayoutGrid
 } from "lucide-react";
@@ -52,15 +46,6 @@ interface MorningDelayPortalProps {
   isGoogleAuthenticated?: boolean;
   onRequireGoogleLogin?: () => void;
 }
-
-const COMMON_REASONS = [
-  { id: "excused", label: "عذر مقبول (معتمد)", badge: "bg-emerald-100 text-emerald-800 border-emerald-300" },
-  { id: "unexcused", label: "بدون عذر", badge: "bg-rose-100 text-rose-800 border-rose-300" },
-  { id: "traffic", label: "ازدحام سير ومواصلات", badge: "bg-amber-100 text-amber-800 border-amber-300" },
-  { id: "overslept", label: "استيقاظ متأخر / نوم", badge: "bg-orange-100 text-orange-800 border-orange-300" },
-  { id: "family", label: "ظروف عائلية", badge: "bg-blue-100 text-blue-800 border-blue-300" },
-  { id: "medical", label: "موعد طبي / صحي", badge: "bg-purple-100 text-purple-800 border-purple-300" }
-];
 
 const TIME_PRESETS = ["07:05", "07:15", "07:25", "07:30", "07:45", "08:00", "08:15"];
 
@@ -119,12 +104,6 @@ export default function MorningDelayPortal({
   const [loading, setLoading] = useState<boolean>(true);
   const [savingStudentId, setSavingStudentId] = useState<string | null>(null);
   const [saveToast, setSaveToast] = useState<string | null>(null);
-
-  // Table Filter & Search
-  const [tableSearch, setTableSearch] = useState<string>("");
-  const [tableFilterGrade, setTableFilterGrade] = useState<string>("all");
-  const [tableFilterReason, setTableFilterReason] = useState<string>("all");
-  const [copiedSummary, setCopiedSummary] = useState<boolean>(false);
 
   // Custom In-App Confirmation Modal for deleting delays (avoiding blocked window.confirm in iframes)
   const [confirmDeleteState, setConfirmDeleteState] = useState<{
@@ -316,27 +295,6 @@ export default function MorningDelayPortal({
     }
   };
 
-  // Filtered Records for Table
-  const filteredRecords = useMemo(() => {
-    return records.filter(r => {
-      // Search
-      if (tableSearch) {
-        const q = tableSearch.toLowerCase();
-        const nameMatch = (r.studentName || "").toLowerCase().includes(q);
-        const gradeMatch = (r.gradeName || "").toLowerCase().includes(q);
-        const classMatch = (r.className || "").toLowerCase().includes(q);
-        const reasonMatch = (r.reason || "").toLowerCase().includes(q);
-        if (!nameMatch && !gradeMatch && !classMatch && !reasonMatch) return false;
-      }
-      // Grade filter
-      if (tableFilterGrade !== "all" && r.gradeId !== tableFilterGrade) return false;
-      // Reason filter
-      if (tableFilterReason !== "all" && r.reason !== tableFilterReason) return false;
-
-      return true;
-    });
-  }, [records, tableSearch, tableFilterGrade, tableFilterReason]);
-
   // Formatted date in Arabic (e.g. الأحد، ٢٣ أغسطس)
   const formattedArabicDate = useMemo(() => {
     try {
@@ -349,40 +307,6 @@ export default function MorningDelayPortal({
       return selectedDate;
     }
   }, [selectedDate]);
-
-  // Statistics summary for current day
-  const stats = useMemo(() => {
-    const total = records.length;
-    const excused = records.filter(r => r.reason.includes("عذر مقبول") || r.reason.includes("معتمد") || r.reason.includes("طبي")).length;
-    const unexcused = total - excused;
-    return { total, excused, unexcused };
-  }, [records]);
-
-  // Generate WhatsApp / Clipboard report text
-  const handleCopyReport = () => {
-    let report = `📋 *تقرير التأخر الصباحي - ${schoolName || "المدرسة"}*\n`;
-    report += `📅 *التاريخ:* ${selectedDate}\n`;
-    report += `⏰ *إجمالي المتأخرين:* ${records.length} طالب\n`;
-    report += `✅ *بعذر:* ${stats.excused} | ❌ *بدون عذر:* ${stats.unexcused}\n`;
-    report += `━━━━━━━━━━━━━━━━━━━━━\n`;
-
-    if (records.length === 0) {
-      report += `لم يُسجل أي تأخر صباحي لهذا اليوم ✨\n`;
-    } else {
-      records.forEach((r, idx) => {
-        report += `${idx + 1}. *${r.studentName}* (${r.gradeName} - ${r.className})\n`;
-        report += `   ⏱️ وقت الوصول: ${r.arrivalTime} | السبب: ${r.reason}\n`;
-      });
-    }
-
-    report += `━━━━━━━━━━━━━━━━━━━━━\n`;
-    report += `تم التوثيق بواسطة: ${recorderName || "المشرف الصباحي"}\nمنصة SmartSchool`;
-
-    navigator.clipboard.writeText(report).then(() => {
-      setCopiedSummary(true);
-      setTimeout(() => setCopiedSummary(false), 2500);
-    });
-  };
 
   // Change Date helper
   const handleDateShift = (days: number) => {
@@ -641,9 +565,12 @@ export default function MorningDelayPortal({
                               </span>
                             ) : isRecorded ? (
                               <div className="flex items-center gap-1.5 sm:gap-2">
-                                <span className="inline-flex items-center justify-center gap-1.5 text-xs font-black text-amber-800 bg-amber-100 border border-amber-300 px-3 py-1.5 rounded-xl shadow-2xs min-w-[76px]">
+                                <span className="inline-flex items-center justify-center gap-1.5 text-xs font-black text-amber-900 bg-amber-100 border border-amber-300 px-2.5 sm:px-3 py-1.5 rounded-xl shadow-2xs">
                                   <span>متأخر</span>
-                                  <span>⏳</span>
+                                  <span className="inline-flex items-center gap-1 text-[11px] font-black bg-amber-200/90 text-amber-950 px-1.5 py-0.5 rounded-md border border-amber-300/80 shadow-3xs" title="وقت تسجيل التأخر">
+                                    <Clock className="w-3 h-3 text-amber-800 shrink-0" />
+                                    <span dir="ltr">{rec?.arrivalTime || arrivalTime || "07:30"}</span>
+                                  </span>
                                 </span>
                                 <button
                                   type="button"
@@ -757,182 +684,6 @@ export default function MorningDelayPortal({
               </div>
             )}
           </div>
-      </div>
-
-      {/* 4. TODAY'S REGISTERED DELAY LOG (سجل التأخر الصباحي لليوم) */}
-      <div className="bg-white rounded-3xl border border-slate-200/90 shadow-sm p-4 md:p-6 space-y-4">
-        
-        {/* Table Header & Controls */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-slate-100 pb-4">
-          <div className="flex items-center gap-2.5">
-            <div className="p-2 bg-blue-50 rounded-xl text-blue-600 border border-blue-200">
-              <FileSpreadsheet className="w-5 h-5" />
-            </div>
-            <div>
-              <h3 className="text-sm font-black text-slate-800 flex items-center gap-2">
-                <span>سجل المتأخرين لليوم</span>
-                <span className="bg-amber-100 text-amber-800 text-[11px] font-black px-2 py-0.5 rounded-full border border-amber-200">
-                  {filteredRecords.length} طالب
-                </span>
-              </h3>
-              <p className="text-[11px] text-slate-400 font-semibold">قائمة الطلاب الذين تم رصد تأخرهم بتاريخ {selectedDate}</p>
-            </div>
-          </div>
-
-          {/* Action Buttons: Copy WhatsApp Summary + Print */}
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={handleCopyReport}
-              className="px-3.5 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-black text-xs rounded-xl border border-emerald-200 flex items-center gap-1.5 transition cursor-pointer shadow-3xs"
-              title="نسخ تقرير جاهز للواتساب لمشاركته مع الإدارة"
-            >
-              {copiedSummary ? (
-                <>
-                  <Check className="w-4 h-4 text-emerald-600 animate-bounce" />
-                  <span>تم نسخ التقرير!</span>
-                </>
-              ) : (
-                <>
-                  <Share2 className="w-4 h-4 text-emerald-600" />
-                  <span>مشاركة التقرير (واتساب)</span>
-                </>
-              )}
-            </button>
-
-            <button
-              type="button"
-              onClick={() => window.print()}
-              className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-black text-xs rounded-xl border border-slate-200 flex items-center gap-1.5 transition cursor-pointer"
-              title="طباعة كشف التأخر الصباحي"
-            >
-              <Printer className="w-4 h-4 text-slate-600" />
-              <span>طباعة</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Filters Bar */}
-        <div className="flex flex-wrap items-center gap-2.5 pt-1">
-          {/* Search in table */}
-          <div className="relative flex-1 min-w-[180px]">
-            <Search className="w-4 h-4 text-slate-400 absolute right-3 top-2.5" />
-            <input
-              type="text"
-              value={tableSearch}
-              onChange={(e) => setTableSearch(e.target.value)}
-              placeholder="تصفية بالاسم أو السبب..."
-              className="w-full text-xs font-bold pr-9 pl-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-amber-500 outline-none"
-            />
-          </div>
-
-          {/* Grade filter */}
-          <select
-            value={tableFilterGrade}
-            onChange={(e) => setTableFilterGrade(e.target.value)}
-            className="text-xs font-bold px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-amber-500 outline-none cursor-pointer"
-          >
-            <option value="all">كل الصفوف الدراسية</option>
-            {grades.map(g => (
-              <option key={g.id} value={g.id}>{g.name}</option>
-            ))}
-          </select>
-
-          {/* Reason filter */}
-          <select
-            value={tableFilterReason}
-            onChange={(e) => setTableFilterReason(e.target.value)}
-            className="text-xs font-bold px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-amber-500 outline-none cursor-pointer"
-          >
-            <option value="all">كل الأسباب</option>
-            {COMMON_REASONS.map(r => (
-              <option key={r.id} value={r.label}>{r.label}</option>
-            ))}
-          </select>
-        </div>
-
-        {/* Delay Table */}
-        {loading ? (
-          <div className="text-center py-12 space-y-3">
-            <Loader2 className="w-8 h-8 text-amber-500 animate-spin mx-auto" />
-            <p className="text-xs font-bold text-slate-400">جاري تحميل سجلات التأخر الصباحي...</p>
-          </div>
-        ) : filteredRecords.length === 0 ? (
-          <div className="text-center py-12 bg-slate-50/80 border border-dashed border-slate-200 rounded-2xl space-y-2">
-            <Clock className="w-10 h-10 text-slate-300 mx-auto" />
-            <p className="text-xs font-black text-slate-600">لا يوجد متأخرين مسجلين في هذا التاريخ حتى الآن</p>
-            <p className="text-[11px] font-medium text-slate-400">استخدم نموذج البحث أو اختيار الفصل أعلاه لرصد الطلاب المتأخرين</p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto rounded-2xl border border-slate-200/90 shadow-3xs">
-            <table className="w-full text-right text-xs">
-              <thead className="bg-slate-100/80 text-slate-700 font-black border-b border-slate-200 text-[11px]">
-                <tr>
-                  <th className="p-3">#</th>
-                  <th className="p-3">اسم الطالب</th>
-                  <th className="p-3">الصف والفصل</th>
-                  <th className="p-3">وقت الوصول</th>
-                  <th className="p-3">سبب التأخر</th>
-                  <th className="p-3">المشرف الراصد</th>
-                  <th className="p-3 text-center">إجراءات</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 font-bold text-slate-700">
-                {filteredRecords.map((rec, index) => {
-                  const isExcused = rec.reason.includes("عذر مقبول") || rec.reason.includes("معتمد") || rec.reason.includes("طبي");
-                  return (
-                    <tr key={rec.id} className="hover:bg-amber-50/40 transition-colors">
-                      <td className="p-3 font-black text-slate-400">{index + 1}</td>
-                      <td className="p-3 font-black text-slate-900">
-                        <div className="flex items-center gap-2">
-                          <div className="w-6 h-6 rounded-md bg-amber-100 text-amber-800 flex items-center justify-center text-[10px] font-black">
-                            {(rec.studentName || "ط").charAt(0)}
-                          </div>
-                          <span>{rec.studentName}</span>
-                        </div>
-                      </td>
-                      <td className="p-3">
-                        <div className="flex items-center gap-1 text-[10px]">
-                          <span className="bg-slate-100 text-slate-700 px-2 py-0.5 rounded border border-slate-200 font-bold">{rec.gradeName}</span>
-                          <span className="bg-slate-100 text-slate-700 px-2 py-0.5 rounded border border-slate-200 font-bold">{rec.className}</span>
-                        </div>
-                      </td>
-                      <td className="p-3">
-                        <span className="inline-flex items-center gap-1 bg-amber-50 border border-amber-200 text-amber-900 font-black px-2 py-1 rounded-lg text-xs">
-                          <Clock className="w-3 h-3 text-amber-600" />
-                          <span>{rec.arrivalTime}</span>
-                        </span>
-                      </td>
-                      <td className="p-3">
-                        <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-extrabold border ${
-                          isExcused
-                            ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                            : "bg-rose-50 text-rose-700 border-rose-200"
-                        }`}>
-                          {isExcused ? <CheckCircle2 className="w-3 h-3" /> : <XCircle className="w-3 h-3" />}
-                          <span>{rec.reason}</span>
-                        </span>
-                      </td>
-                      <td className="p-3 text-[11px] text-slate-500 font-medium">
-                        {rec.recordedBy || "مشرف التأخر"}
-                      </td>
-                      <td className="p-3 text-center">
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteRecord(rec.id, rec.studentName, rec.studentId, rec.date)}
-                          className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition cursor-pointer"
-                          title="حذف هذا السجل"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
       </div>
 
       {/* Custom Confirmation Modal for Deleting Delays */}

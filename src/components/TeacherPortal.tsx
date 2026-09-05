@@ -153,8 +153,6 @@ export default function TeacherPortal({ grades, classes, teachers, students: pro
 
   // Monitor the first sticky element's height and compute the top offset for the second sticky element dynamically
   useEffect(() => {
-    if (!firstStickyRef.current) return;
-
     const updateTopOffset = () => {
       if (firstStickyRef.current) {
         const height = firstStickyRef.current.offsetHeight;
@@ -164,16 +162,18 @@ export default function TeacherPortal({ grades, classes, teachers, students: pro
 
     updateTopOffset();
 
-    // ResizeObserver ensures it triggers even if content sizes changes without window resize
-    const observer = new ResizeObserver(updateTopOffset);
-    observer.observe(firstStickyRef.current);
+    let observer: ResizeObserver | null = null;
+    if (firstStickyRef.current) {
+      observer = new ResizeObserver(updateTopOffset);
+      observer.observe(firstStickyRef.current);
+    }
     window.addEventListener("resize", updateTopOffset);
 
     return () => {
-      observer.disconnect();
+      if (observer) observer.disconnect();
       window.removeEventListener("resize", updateTopOffset);
     };
-  }, []);
+  }, [grades, filteredClasses, selectedGradeId]);
 
   // Initialize dropdowns with first elements when data loaded
   useEffect(() => {
@@ -727,9 +727,12 @@ export default function TeacherPortal({ grades, classes, teachers, students: pro
         )}
       </div>
 
-      {/* QUICK STATS & SELECTION SUMMARY CARD */}
-      <div className="flex flex-col mb-1">
-        <div className={`bg-white/95 rounded-2xl shadow-sm border border-slate-200/90 p-3.5 flex flex-col gap-2.5 transition-all duration-300 ${
+      {/* QUICK STATS & SELECTION SUMMARY CARD (مثبت أثناء التمرير) */}
+      <div 
+        style={{ top: "calc(var(--header-height, 0px) + var(--first-sticky-height, 120px) + 8px)" }}
+        className="sticky z-20 flex flex-col mb-1 transition-all"
+      >
+        <div className={`bg-white/95 backdrop-blur-md rounded-2xl shadow-md border border-slate-200/90 p-3 sm:p-3.5 flex flex-col gap-2 sm:gap-2.5 transition-all duration-300 ${
           activeTab === "attendance" ? "border-t-4 border-t-blue-600" : "border-t-4 border-t-amber-500"
         }`}>
           {/* Quick stats (Attendance & Absence side by side) */}
