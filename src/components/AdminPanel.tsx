@@ -1304,15 +1304,42 @@ export default function AdminPanel({
       });
 
       todayAttendance.forEach(rec => {
-        // Robust grade matching (by ID, by name, by Arabic normalization, or through associated class)
+        // Robust grade matching (by ID, by name, by Arabic normalization, through associated class, or through student)
         let grade = grades.find(g => g.id === rec.gradeId || g.name === rec.gradeId);
         if (!grade && rec.gradeId) {
           grade = grades.find(g => normalizeArabic(g.name) === normalizeArabic(rec.gradeId));
         }
         if (!grade && rec.classId) {
-          const matchedClass = classes.find(c => c.id === rec.classId || c.name === rec.classId);
+          const matchedClass = classes.find(c => c.id === rec.classId || c.name === rec.classId || normalizeArabic(c.name) === normalizeArabic(rec.classId));
           if (matchedClass) {
-            grade = grades.find(g => g.id === matchedClass.gradeId);
+            grade = grades.find(g => g.id === matchedClass.gradeId || normalizeArabic(g.name) === normalizeArabic(matchedClass.gradeId));
+          }
+        }
+        if (!grade && ((rec.absent && rec.absent.length > 0) || (rec.late && rec.late.length > 0) || (rec.present && rec.present.length > 0))) {
+          const sampleStId = (rec.absent && rec.absent[0]) || (rec.late && rec.late[0]) || (rec.present && rec.present[0]);
+          const matchedSt = students.find(s => s && (s.id === sampleStId || s.name === sampleStId));
+          if (matchedSt) {
+            if (matchedSt.gradeId) {
+              grade = grades.find(g => g.id === matchedSt.gradeId || normalizeArabic(g.name) === normalizeArabic(matchedSt.gradeId));
+            }
+            if (!grade && matchedSt.classId) {
+              const stClass = classes.find(c => c.id === matchedSt.classId || normalizeArabic(c.name) === normalizeArabic(matchedSt.classId));
+              if (stClass) {
+                grade = grades.find(g => g.id === stClass.gradeId);
+              }
+            }
+          }
+        }
+        // Fallback by text matching "اول", "ثاني", "ثالث"
+        if (!grade) {
+          const recText = `${rec.gradeId || ""} ${(rec as any).gradeName || ""} ${(rec as any).grade || ""}`;
+          const normRecText = normalizeArabic(recText);
+          if (normRecText.includes("اول") || normRecText.includes("أول")) {
+            grade = grades.find(g => normalizeArabic(g.name).includes("اول") || normalizeArabic(g.name).includes("أول"));
+          } else if (normRecText.includes("ثان")) {
+            grade = grades.find(g => normalizeArabic(g.name).includes("ثان"));
+          } else if (normRecText.includes("ثالث")) {
+            grade = grades.find(g => normalizeArabic(g.name).includes("ثالث"));
           }
         }
         const fallbackGradeId = grade ? grade.id : (grades[0]?.id || rec.gradeId || "general_grade");
@@ -1463,6 +1490,40 @@ export default function AdminPanel({
           return stId;
         };
 
+        const pushToEntriesByGrade = (entry: any, targetGradeId: string, targetGradeName: string) => {
+          if (!entriesByGrade[targetGradeId]) {
+            entriesByGrade[targetGradeId] = [];
+          }
+          if (!entriesByGrade[targetGradeId].some(e => e.id === entry.id)) {
+            entriesByGrade[targetGradeId].push(entry);
+          }
+
+          const norm = normalizeArabic(targetGradeName);
+          if (norm) {
+            if (!entriesByGrade[norm]) entriesByGrade[norm] = [];
+            if (!entriesByGrade[norm].some(e => e.id === entry.id)) {
+              entriesByGrade[norm].push(entry);
+            }
+          }
+
+          // Also populate into any grade in the grades array matching this level
+          grades.forEach(g => {
+            const gn = normalizeArabic(g.name);
+            const isMatch = (g.id === targetGradeId) ||
+              (gn === norm) ||
+              ((gn.includes("اول") || gn.includes("أول")) && (norm.includes("اول") || norm.includes("أول"))) ||
+              (gn.includes("ثان") && norm.includes("ثان")) ||
+              (gn.includes("ثالث") && norm.includes("ثالث"));
+
+            if (isMatch) {
+              if (!entriesByGrade[g.id]) entriesByGrade[g.id] = [];
+              if (!entriesByGrade[g.id].some(e => e.id === entry.id)) {
+                entriesByGrade[g.id].push(entry);
+              }
+            }
+          });
+        };
+
         // 1. Process absent students
         if (!rec.isNoAbsence && rec.absent && rec.absent.length > 0) {
           rec.absent.forEach(stId => {
@@ -1484,18 +1545,15 @@ export default function AdminPanel({
               isLate: false
             };
 
-            if (!entriesByGrade[fallbackGradeId]) {
-              entriesByGrade[fallbackGradeId] = [];
-            }
-            entriesByGrade[fallbackGradeId].push(entry);
+            pushToEntriesByGrade(entry, fallbackGradeId, gradeName);
 
             const normGrade = normalizeArabic(gradeName);
             if (normGrade.includes(normalizeArabic("الأول"))) {
-              g1Entries.push(entry);
+              if (!g1Entries.some(e => e.id === entry.id)) g1Entries.push(entry);
             } else if (normGrade.includes(normalizeArabic("الثاني"))) {
-              g2Entries.push(entry);
+              if (!g2Entries.some(e => e.id === entry.id)) g2Entries.push(entry);
             } else if (normGrade.includes(normalizeArabic("الثالث"))) {
-              g3Entries.push(entry);
+              if (!g3Entries.some(e => e.id === entry.id)) g3Entries.push(entry);
             }
           });
         }
@@ -1521,18 +1579,15 @@ export default function AdminPanel({
               isLate: true
             };
 
-            if (!entriesByGrade[fallbackGradeId]) {
-              entriesByGrade[fallbackGradeId] = [];
-            }
-            entriesByGrade[fallbackGradeId].push(entry);
+            pushToEntriesByGrade(entry, fallbackGradeId, gradeName);
 
             const normGrade = normalizeArabic(gradeName);
             if (normGrade.includes(normalizeArabic("الأول"))) {
-              g1Entries.push(entry);
+              if (!g1Entries.some(e => e.id === entry.id)) g1Entries.push(entry);
             } else if (normGrade.includes(normalizeArabic("الثاني"))) {
-              g2Entries.push(entry);
+              if (!g2Entries.some(e => e.id === entry.id)) g2Entries.push(entry);
             } else if (normGrade.includes(normalizeArabic("الثالث"))) {
-              g3Entries.push(entry);
+              if (!g3Entries.some(e => e.id === entry.id)) g3Entries.push(entry);
             }
           });
         }
@@ -1557,18 +1612,15 @@ export default function AdminPanel({
             isNoAbsenceDummy: true
           };
 
-          if (!entriesByGrade[fallbackGradeId]) {
-            entriesByGrade[fallbackGradeId] = [];
-          }
-          entriesByGrade[fallbackGradeId].push(entry);
+          pushToEntriesByGrade(entry, fallbackGradeId, gradeName);
 
           const normGrade = normalizeArabic(gradeName);
           if (normGrade.includes(normalizeArabic("الأول"))) {
-            g1Entries.push(entry);
+            if (!g1Entries.some(e => e.id === entry.id)) g1Entries.push(entry);
           } else if (normGrade.includes(normalizeArabic("الثاني"))) {
-            g2Entries.push(entry);
+            if (!g2Entries.some(e => e.id === entry.id)) g2Entries.push(entry);
           } else if (normGrade.includes(normalizeArabic("الثالث"))) {
-            g3Entries.push(entry);
+            if (!g3Entries.some(e => e.id === entry.id)) g3Entries.push(entry);
           }
         }
       });
@@ -1585,9 +1637,22 @@ export default function AdminPanel({
         if (!matchedCls && studentClassId) {
           matchedCls = classes.find(c => normalizeArabic(c.name) === normalizeArabic(studentClassId));
         }
-        const studentGradeId = student?.gradeId || (matchedCls ? matchedCls.gradeId : (grades[0]?.id || "general_grade"));
-        const matchedGrade = grades.find(g => g.id === studentGradeId);
-        const gradeName = matchedGrade?.name || "الصف الدراسي";
+        let matchedGrade = grades.find(g => g.id === student?.gradeId);
+        if (!matchedGrade && matchedCls) {
+          matchedGrade = grades.find(g => g.id === matchedCls.gradeId);
+        }
+        if (!matchedGrade && d.gradeName) {
+          matchedGrade = grades.find(g => normalizeArabic(g.name) === normalizeArabic(d.gradeName));
+        }
+        if (!matchedGrade) {
+          const dText = normalizeArabic(`${d.gradeName || ""} ${d.studentName || ""}`);
+          if (dText.includes("اول") || dText.includes("أول")) matchedGrade = grades.find(g => normalizeArabic(g.name).includes("اول") || normalizeArabic(g.name).includes("أول"));
+          else if (dText.includes("ثان")) matchedGrade = grades.find(g => normalizeArabic(g.name).includes("ثان"));
+          else if (dText.includes("ثالث")) matchedGrade = grades.find(g => normalizeArabic(g.name).includes("ثالث"));
+        }
+
+        const studentGradeId = matchedGrade ? matchedGrade.id : (grades[0]?.id || "general_grade");
+        const gradeName = matchedGrade?.name || d.gradeName || "الصف الدراسي";
 
         let actualTime = d.arrivalTime || "";
         if (!actualTime && d.timestamp) {
@@ -1631,6 +1696,29 @@ export default function AdminPanel({
         }
 
         const normGrade = normalizeArabic(gradeName);
+        if (normGrade) {
+          if (!entriesByGrade[normGrade]) entriesByGrade[normGrade] = [];
+          if (!entriesByGrade[normGrade].some(e => e.id === entry.id)) {
+            entriesByGrade[normGrade].push(entry);
+          }
+        }
+
+        grades.forEach(g => {
+          const gn = normalizeArabic(g.name);
+          const isMatch = (g.id === studentGradeId) ||
+            (gn === normGrade) ||
+            ((gn.includes("اول") || gn.includes("أول")) && (normGrade.includes("اول") || normGrade.includes("أول"))) ||
+            (gn.includes("ثان") && normGrade.includes("ثان")) ||
+            (gn.includes("ثالث") && normGrade.includes("ثالث"));
+
+          if (isMatch) {
+            if (!entriesByGrade[g.id]) entriesByGrade[g.id] = [];
+            if (!entriesByGrade[g.id].some(e => e.id === entry.id)) {
+              entriesByGrade[g.id].push(entry);
+            }
+          }
+        });
+
         if (normGrade.includes(normalizeArabic("الأول"))) {
           if (!g1Entries.some(e => e.id === entry.id)) g1Entries.push(entry);
         } else if (normGrade.includes(normalizeArabic("الثاني"))) {
@@ -2968,7 +3056,16 @@ export default function AdminPanel({
 
               <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4 items-start">
               {grades.map(grade => {
-                const allGradeEntries = todayStats.entriesByGrade[grade.id] || [];
+                const normGName = normalizeArabic(grade.name);
+                let allGradeEntries = todayStats.entriesByGrade[grade.id] || [];
+                if (allGradeEntries.length === 0) {
+                  allGradeEntries = todayStats.entriesByGrade[normGName] || [];
+                }
+                if (allGradeEntries.length === 0) {
+                  if (normGName.includes("اول") || normGName.includes("أول")) allGradeEntries = todayStats.g1Entries || [];
+                  else if (normGName.includes("ثان")) allGradeEntries = todayStats.g2Entries || [];
+                  else if (normGName.includes("ثالث")) allGradeEntries = todayStats.g3Entries || [];
+                }
                 // Exclude morning delay entries from the attendance tab (only show classroom absences and class lates)
                 const rawGradeEntries = allGradeEntries.filter((e: any) => !e.isMorningDelay);
                 
