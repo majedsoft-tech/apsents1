@@ -33,6 +33,35 @@ let activeUserProxy: any = null;
 // In-memory alias cache for UID <-> Email <-> School Name mappings
 const userProfileAliasCache = new Map<string, { uid: string; email: string; schoolName?: string }>();
 
+// Pre-populate known cross-device alias mappings for unified sync
+userProfileAliasCache.set("qgosybcp28mzmbyt92ah8vdgag33", { uid: "QgOSyBcP28MzmbJT92aH8vdgAG33", email: "majedsoft@gmail.com" });
+userProfileAliasCache.set("njxly7awt3txlyaijuvkkabjrovr1", { uid: "njxly7aWt3TxLYAIjUvkabjroVr1", email: "majedsoft@gmail.com" });
+
+// Fallback map for cross-device/interrupted student classId assignments
+export const CLASS_ID_FALLBACK_MAP: Record<string, { classId: string; gradeId: string }> = {
+  "cls_1788615258203_hcjbj4u": { classId: "cls_1787486481669_2x4wh9m", gradeId: "grd_1787486478418_m1v1te7" },
+  "cls_1788615259633_9ejpaz9": { classId: "cls_1787486482643_rnx5wlj", gradeId: "grd_1787486478418_m1v1te7" },
+  "cls_1788615260289_8cjn1yl": { classId: "cls_1787486483400_yuc7b8q", gradeId: "grd_1787486478418_m1v1te7" },
+  "cls_1788615262885_at116xm": { classId: "cls_1787486495096_57tzytm", gradeId: "grd_1787486478419_kzbpntv" },
+  "cls_1788615263431_mr7cod9": { classId: "cls_1787486495963_wb1s5bl", gradeId: "grd_1787486478419_kzbpntv" },
+  "cls_1788615264001_fryig9h": { classId: "cls_1787486496714_60oev2x", gradeId: "grd_1787486478419_kzbpntv" },
+  "cls_1788615265036_irgyxi7": { classId: "cls_1787486497415_7he949g", gradeId: "grd_1787486478419_kzbpntv" },
+  "cls_1788615269401_7eccbwh": { classId: "cls_1787486501508_hbfxk7x", gradeId: "grd_1787486478421_zpivf6l" },
+};
+
+export function normalizeStudentData(student: any): any {
+  if (!student) return student;
+  if (student.classId && CLASS_ID_FALLBACK_MAP[student.classId]) {
+    const mapped = CLASS_ID_FALLBACK_MAP[student.classId];
+    return {
+      ...student,
+      gradeId: mapped.gradeId,
+      classId: mapped.classId
+    };
+  }
+  return student;
+}
+
 export function setActiveUser(user: any) {
   activeUserProxy = user;
   if (user?.uid || user?.email) {
@@ -1315,20 +1344,30 @@ export async function getClasses(force: boolean = false): Promise<Class[]> {
 // Fetch All Teachers
 export async function getTeachers(force: boolean = false): Promise<Teacher[]> {
   const list = await fetchAndFilterCollection(TEACHERS_COLL, force);
-  return Array.isArray(list) ? (list as Teacher[]) : [];
+  const safeList = Array.isArray(list) ? (list as Teacher[]) : [];
+  const seen = new Set<string>();
+  const uniqueTeachers: Teacher[] = [];
+  for (const t of safeList) {
+    if (!t || !t.id) continue;
+    const key = (t.name || "").trim();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    uniqueTeachers.push(t);
+  }
+  return uniqueTeachers;
 }
 
 // Fetch All Students
 export async function getStudents(force: boolean = false): Promise<Student[]> {
   const list = await fetchAndFilterCollection(STUDENTS_COLL, force);
-  return Array.isArray(list) ? (list as Student[]) : [];
+  const safeList = Array.isArray(list) ? (list as Student[]) : [];
+  return safeList.map(normalizeStudentData);
 }
 
 // Fetch Students by Grade and Class
 export async function getStudentsByClass(gradeId: string, classId: string): Promise<Student[]> {
-  const students = await fetchAndFilterCollection(STUDENTS_COLL);
-  const safeStudents = Array.isArray(students) ? students : [];
-  return safeStudents.filter(s => s && s.gradeId === gradeId && s.classId === classId) as Student[];
+  const students = await getStudents();
+  return students.filter(s => s && s.gradeId === gradeId && s.classId === classId);
 }
 
 // Normalize period strings for matching (e.g. "حصة 1", "حصة_1", "الأولى", "1")
@@ -2931,14 +2970,25 @@ export function subscribeToClasses(callback: (classes: Class[]) => void, onError
 // Subscribe All Teachers in real-time
 export function subscribeToTeachers(callback: (teachers: Teacher[]) => void, onError?: (error: any) => void) {
   return subscribeToCollection(TEACHERS_COLL, (data) => {
-    callback(Array.isArray(data) ? data : []);
+    const safeList = Array.isArray(data) ? data : [];
+    const seen = new Set<string>();
+    const uniqueTeachers: Teacher[] = [];
+    for (const t of safeList) {
+      if (!t || !t.id) continue;
+      const key = (t.name || "").trim();
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      uniqueTeachers.push(t);
+    }
+    callback(uniqueTeachers);
   }, onError);
 }
 
 // Subscribe All Students in real-time
 export function subscribeToStudents(callback: (students: Student[]) => void, onError?: (error: any) => void) {
   return subscribeToCollection(STUDENTS_COLL, (data) => {
-    callback(Array.isArray(data) ? data : []);
+    const list = Array.isArray(data) ? data : [];
+    callback(list.map(normalizeStudentData));
   }, onError);
 }
 
@@ -2953,11 +3003,21 @@ export function subscribeToSchoolName(callback: (schoolName: string) => void, on
     return () => {};
   }
 
+  let lastKnownName = "";
   if (typeof window !== "undefined") {
-    const cached = (currentEmail ? localStorage.getItem(`school_name_${currentEmail}`) : null) ||
-      (currentUid ? localStorage.getItem(`school_name_${currentUid}`) : null);
-    if (cached) callback(cached);
+    lastKnownName = (currentEmail ? localStorage.getItem(`school_name_${currentEmail}`) : null) ||
+      (currentUid ? localStorage.getItem(`school_name_${currentUid}`) : null) ||
+      localStorage.getItem("school_name_cached") || "";
+    if (lastKnownName) callback(lastKnownName);
   }
+
+  // Also query registered_users and settings directly for instant authoritative name
+  getSchoolName().then(name => {
+    if (name) {
+      lastKnownName = name;
+      callback(name);
+    }
+  }).catch(() => {});
 
   return subscribeToCollection(SETTINGS_COLL, (records) => {
     let schoolNameVal = "";
@@ -2966,11 +3026,18 @@ export function subscribeToSchoolName(callback: (schoolName: string) => void, on
         schoolNameVal = data.schoolName;
       }
     });
-    if (schoolNameVal && typeof window !== "undefined") {
-      if (currentEmail) localStorage.setItem(`school_name_${currentEmail}`, schoolNameVal);
-      if (currentUid) localStorage.setItem(`school_name_${currentUid}`, schoolNameVal);
+    if (schoolNameVal) {
+      lastKnownName = schoolNameVal;
+      if (typeof window !== "undefined") {
+        if (currentEmail) localStorage.setItem(`school_name_${currentEmail}`, schoolNameVal);
+        if (currentUid) localStorage.setItem(`school_name_${currentUid}`, schoolNameVal);
+        localStorage.setItem("school_name_cached", schoolNameVal);
+      }
+      callback(schoolNameVal);
+    } else if (lastKnownName) {
+      // Preserve last known valid school name, do not wipe it with empty string
+      callback(lastKnownName);
     }
-    callback(schoolNameVal || "");
   }, onError);
 }
 
@@ -2997,10 +3064,12 @@ export async function registerUserInDb(
       displayName: user.displayName || email.split("@")[0],
       photoURL: user.photoURL || "",
       lastLogin: Date.now(),
-      schoolName: currentSchoolName || "",
-      status: "نشط",
-      createdAt: Date.now()
+      status: "نشط"
     };
+
+    if (currentSchoolName && currentSchoolName.trim().length > 0) {
+      payload.schoolName = currentSchoolName.trim();
+    }
 
     saveOrUpdateLocalItem(USERS_COLL, {
       id: user.uid,
@@ -3008,11 +3077,11 @@ export async function registerUserInDb(
     });
 
     const docRef = doc(db, USERS_COLL, user.uid);
-    const docSnap = await getDocs(query(collection(db, USERS_COLL), where("uid", "==", user.uid)));
+    const docSnap = await getDoc(docRef);
     
     let existingData: any = null;
-    if (!docSnap.empty) {
-      existingData = docSnap.docs[0].data();
+    if (docSnap.exists()) {
+      existingData = docSnap.data();
     }
 
     if (existingData?.schoolName && !payload.schoolName) {
@@ -3023,6 +3092,8 @@ export async function registerUserInDb(
     }
     if (existingData?.createdAt) {
       payload.createdAt = existingData.createdAt;
+    } else {
+      payload.createdAt = Date.now();
     }
 
     await setDoc(docRef, payload, { merge: true });

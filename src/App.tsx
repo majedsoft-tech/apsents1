@@ -430,23 +430,34 @@ export default function App() {
     try {
       // 1. Subscribe to School Name
       unsubSchool = subscribeToSchoolName((newName) => {
-        if (newName) {
-          setSchoolName(newName);
+        if (newName && newName.trim().length > 0) {
+          setSchoolName(newName.trim());
           if (currentUser?.email) {
-            localStorage.setItem(`school_name_${currentUser.email.toLowerCase().trim()}`, newName);
+            localStorage.setItem(`school_name_${currentUser.email.toLowerCase().trim()}`, newName.trim());
           }
           if (currentUser?.uid) {
-            localStorage.setItem(`school_name_${currentUser.uid}`, newName);
+            localStorage.setItem(`school_name_${currentUser.uid}`, newName.trim());
           }
-        } else {
-          setSchoolName("");
+          if (typeof window !== "undefined") {
+            localStorage.setItem("school_name_cached", newName.trim());
+          }
         }
       });
 
       // 2. Subscribe to Grades
       unsubGrades = subscribeToGrades((newGrades) => {
         const safeList = Array.isArray(newGrades) ? newGrades : [];
-        const sorted = deduplicateById([...safeList]).sort((a, b) => {
+        const seenNames = new Set<string>();
+        const uniqueGrades: Grade[] = [];
+        for (const g of safeList) {
+          if (!g || !g.id) continue;
+          const key = (g.name || "").trim();
+          if (!seenNames.has(key)) {
+            seenNames.add(key);
+            uniqueGrades.push(g);
+          }
+        }
+        const sorted = uniqueGrades.sort((a, b) => {
           const timeA = (a as any).createdAt || 0;
           const timeB = (b as any).createdAt || 0;
           if (timeA !== timeB) return timeA - timeB;
@@ -471,7 +482,17 @@ export default function App() {
       // 4. Subscribe to Teachers
       unsubTeachers = subscribeToTeachers((newTeachers) => {
         const safeList = Array.isArray(newTeachers) ? newTeachers : [];
-        const sorted = deduplicateById([...safeList]).sort((a, b) => (a.name || "").localeCompare(b.name || "", "ar"));
+        const seenNames = new Set<string>();
+        const uniqueTeachers: Teacher[] = [];
+        for (const t of safeList) {
+          if (!t || !t.id) continue;
+          const key = (t.name || "").trim();
+          if (!seenNames.has(key)) {
+            seenNames.add(key);
+            uniqueTeachers.push(t);
+          }
+        }
+        const sorted = uniqueTeachers.sort((a, b) => (a.name || "").localeCompare(b.name || "", "ar"));
         setTeachers(sorted);
       });
 
@@ -562,8 +583,20 @@ export default function App() {
         getStudents(true),
         getSchoolName(true)
       ]);
-      if (sn) setSchoolName(sn);
-      const sortedGrades = deduplicateById([...g]).sort((a, b) => {
+      if (sn && sn.trim().length > 0) {
+        setSchoolName(sn.trim());
+      }
+      const seenGradeNames = new Set<string>();
+      const uniqueGrades: Grade[] = [];
+      for (const grade of g) {
+        if (!grade || !grade.id) continue;
+        const key = (grade.name || "").trim();
+        if (!seenGradeNames.has(key)) {
+          seenGradeNames.add(key);
+          uniqueGrades.push(grade);
+        }
+      }
+      const sortedGrades = uniqueGrades.sort((a, b) => {
         const timeA = (a as any).createdAt || 0;
         const timeB = (b as any).createdAt || 0;
         if (timeA !== timeB) return timeA - timeB;
@@ -579,7 +612,17 @@ export default function App() {
       });
       setClasses(sortedClasses);
 
-      const sortedTeachers = deduplicateById([...t]).sort((a, b) => a.name.localeCompare(b.name, "ar"));
+      const seenTeacherNames = new Set<string>();
+      const uniqueTeachers: Teacher[] = [];
+      for (const teacher of t) {
+        if (!teacher || !teacher.id) continue;
+        const key = (teacher.name || "").trim();
+        if (!seenTeacherNames.has(key)) {
+          seenTeacherNames.add(key);
+          uniqueTeachers.push(teacher);
+        }
+      }
+      const sortedTeachers = uniqueTeachers.sort((a, b) => a.name.localeCompare(b.name, "ar"));
       setTeachers(sortedTeachers);
 
       setStudents(deduplicateById(s));
@@ -590,6 +633,7 @@ export default function App() {
       console.error("Error refreshing data:", err);
     } finally {
       setIsRefreshingData(false);
+      setLoading(false);
     }
   };
 
@@ -786,9 +830,10 @@ export default function App() {
           }
         } catch (_) {}
         setLoading(true);
-        // Force refresh from Firestore in parallel for 100% sync
+        // Force refresh authoritative data from Firestore
         await handleRefreshData();
-        await syncAllLocalDataToFirestore();
+        // Background sync: non-blocking, safe against write quota exhaustion
+        syncAllLocalDataToFirestore().catch(() => {});
       }
       setAppMode("admin");
       setAdminTab("stats");
@@ -802,6 +847,8 @@ export default function App() {
       } else {
         setLoginError(err?.message || "حدث خطأ أثناء تسجيل الدخول");
       }
+    } finally {
+      setLoading(false);
     }
   };
 
