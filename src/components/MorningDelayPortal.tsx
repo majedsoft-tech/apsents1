@@ -665,7 +665,7 @@ export default function MorningDelayPortal({
                             {isSaving ? (
                               <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-600 shrink-0" />
                             ) : isRecorded ? (
-                              <div className="flex items-center gap-1 shrink-0">
+                              <div className="hidden sm:flex items-center gap-1 shrink-0">
                                 <span className="bg-amber-600 text-white text-[9px] font-black px-1.5 py-0.5 rounded flex items-center gap-0.5 shadow-3xs whitespace-nowrap">
                                   <Clock className="w-2.5 h-2.5" /> {rec?.arrivalTime || "07:30"}
                                 </span>
@@ -689,7 +689,13 @@ export default function MorningDelayPortal({
 
                           <div className="flex items-center justify-between text-[10px] font-bold text-slate-400 pt-1 border-t border-slate-200/50">
                             <span className="truncate">{isRecorded ? `السبب: ${rec?.reason || "تأخر"}` : "اضغط للرصد 👈"}</span>
-                            <div className="flex items-center gap-1 shrink-0">
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              {/* Mobile Only: Delay time placed below student name next to 'متأخر' */}
+                              {isRecorded && (
+                                <span className="sm:hidden bg-amber-600 text-white text-[9px] font-black px-1.5 py-0.5 rounded flex items-center gap-0.5 shadow-3xs whitespace-nowrap">
+                                  <Clock className="w-2.5 h-2.5" /> {rec?.arrivalTime || "07:30"}
+                                </span>
+                              )}
                               <span className={`font-black ${isRecorded ? "text-amber-700" : "text-amber-600"}`}>
                                 {isRecorded ? "متأخر" : "+ رصد"}
                               </span>

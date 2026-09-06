@@ -291,12 +291,17 @@ export default function App() {
     }
 
     const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
-      clearUserSessionState();
       if (user) {
         setCurrentUser(user);
         setActiveUser(user);
         try {
           localStorage.setItem("last_active_school_owner", JSON.stringify({ uid: user.uid, email: user.email || "" }));
+          if (user.email) {
+            localStorage.setItem("own_school_admin_email", user.email);
+          }
+          if (user.uid) {
+            localStorage.setItem("own_school_admin_id", user.uid);
+          }
         } catch (_) {}
         // Proactively refresh authoritative cloud data for this user on second device or reload
         handleRefreshData().catch(() => {});
@@ -578,6 +583,9 @@ export default function App() {
       setTeachers(sortedTeachers);
 
       setStudents(deduplicateById(s));
+      try {
+        window.dispatchEvent(new CustomEvent("school_refresh_stats"));
+      } catch (_) {}
     } catch (err) {
       console.error("Error refreshing data:", err);
     } finally {
@@ -587,7 +595,7 @@ export default function App() {
 
   const buildSharedUrl = (pageValue: string, extraParams: string = "") => {
     const ownerId = currentUser?.uid || auth.currentUser?.uid || localStorage.getItem("own_school_admin_id") || getOrCreateOwnSchoolAdminId();
-    const ownerEmail = currentUser?.email || auth.currentUser?.email || "";
+    const ownerEmail = currentUser?.email || auth.currentUser?.email || localStorage.getItem("own_school_admin_email") || "";
     
     let query = `page=${pageValue}`;
     if (extraParams) query += `&${extraParams}`;
@@ -763,7 +771,6 @@ export default function App() {
   const handleGoogleLogin = async () => {
     setLoginError(null);
     try {
-      clearUserSessionState();
       const res = await signInWithPopup(auth, googleProvider);
       const user = res.user;
       if (user) {
@@ -771,6 +778,12 @@ export default function App() {
         setActiveUser(user);
         try {
           localStorage.setItem("last_active_school_owner", JSON.stringify({ uid: user.uid, email: user.email || "" }));
+          if (user.email) {
+            localStorage.setItem("own_school_admin_email", user.email);
+          }
+          if (user.uid) {
+            localStorage.setItem("own_school_admin_id", user.uid);
+          }
         } catch (_) {}
         setLoading(true);
         // Force refresh from Firestore in parallel for 100% sync

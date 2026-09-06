@@ -1710,15 +1710,15 @@ export default function AdminPanel({
     setStatsLoading(true);
     try {
       const [attendance, behaviors, delays] = await Promise.all([
-        getAllAttendanceRecords(),
-        getAllBehaviorRecords(),
-        getAllMorningDelayRecords()
+        getAllAttendanceRecords(true),
+        getAllBehaviorRecords(true),
+        getAllMorningDelayRecords(true)
       ]);
       cachedAttendanceRef.current = attendance;
       cachedBehaviorsRef.current = behaviors;
       cachedDelaysRef.current = delays;
       setMorningDelaysList(delays);
-      computeStatistics(attendance, behaviors, delays);
+      computeStatistics(attendance, behaviors, delays, true, selectedAttendanceDate);
     } catch (e) {
       console.error("Error loading stats:", e);
     } finally {
@@ -1949,6 +1949,9 @@ export default function AdminPanel({
         setStatsLoading(false);
       };
 
+      // Proactively load authoritative statistics on mount/refresh
+      loadStatistics();
+
       const unsubAttendance = subscribeToAllAttendanceRecords(
         (records) => {
           cachedAttendanceRef.current = records;
@@ -1981,13 +1984,19 @@ export default function AdminPanel({
         }
       );
 
+      const handleForceRefresh = () => {
+        loadStatistics();
+      };
+      window.addEventListener("school_refresh_stats", handleForceRefresh);
+
       return () => {
         unsubAttendance();
         unsubBehaviors();
         unsubDelays();
+        window.removeEventListener("school_refresh_stats", handleForceRefresh);
       };
     }
-  }, [isAuthenticated, isReadOnly]);
+  }, [isAuthenticated, isReadOnly, isGoogleAuthenticated, schoolName]);
 
   // Re-compute stats when students, classes, grades, activeSubTab, or selectedAttendanceDate change
   useEffect(() => {

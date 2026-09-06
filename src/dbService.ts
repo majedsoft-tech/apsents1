@@ -472,8 +472,8 @@ export function isDocBelongingToUser(data: any, currentUid?: string, currentEmai
   // If no user context exists, no private user document should be accessible
   if (!targetEmail && !targetUid) return false;
 
-  const docEmail = (data.userEmail || data.email || data.schoolEmail || "").toLowerCase().trim();
-  const docUid = (data.userId || data.uid || data.ownerId || "").trim();
+  const docEmail = (data.userEmail || data.email || data.schoolEmail || data.ownerEmail || "").toLowerCase().trim();
+  const docUid = (data.userId || data.uid || data.ownerId || data.owner || "").trim();
 
   // 1. Direct match on Email
   if (targetEmail && docEmail && targetEmail === docEmail) {
@@ -508,7 +508,35 @@ export function isDocBelongingToUser(data: any, currentUid?: string, currentEmai
     if (revAlias && revAlias.uid && revAlias.uid === targetUid) return true;
   }
 
-  // 4. Fallback for locally created items without explicit user tags within same local context
+  // Check stored admin ID linkage from localStorage
+  if (typeof window !== "undefined") {
+    try {
+      const localOwnAdminId = localStorage.getItem("own_school_admin_id") || "";
+      if (localOwnAdminId && docUid && docUid === localOwnAdminId) {
+        return true;
+      }
+      const localOwnEmail = (localStorage.getItem("own_school_admin_email") || "").toLowerCase().trim();
+      if (localOwnEmail && docEmail && docEmail === localOwnEmail) {
+        return true;
+      }
+    } catch (_) {}
+  }
+
+  // 4. Match by tenant prefix encoded inside document ID (e.g. att_majedsoft_gmail_com_... or delay_majedsoft_gmail_com_...)
+  const docId = (data.id || data._docId || "").toString();
+  if (targetEmail && docId) {
+    const safePrefix = targetEmail.replace(/[^a-zA-Z0-9]/g, '_');
+    if (docId.includes(`_${safePrefix}_`) || docId.startsWith(`att_${safePrefix}`) || docId.startsWith(`delay_${safePrefix}`)) {
+      return true;
+    }
+  }
+  if (targetUid && docId && targetUid !== "school_admin") {
+    if (docId.includes(`_${targetUid}_`) || docId.startsWith(`att_${targetUid}`) || docId.startsWith(`delay_${targetUid}`)) {
+      return true;
+    }
+  }
+
+  // 5. Fallback for locally created items without explicit user tags within same local context
   if (!docEmail && (!docUid || docUid === "school_admin") && !targetEmail && targetUid === "school_admin") {
     return true;
   }
@@ -1839,8 +1867,8 @@ export async function deleteMorningDelayRecord(
 }
 
 // Fetch all morning delay records for stats/reports
-export async function getAllMorningDelayRecords(): Promise<MorningDelayRecord[]> {
-  return fetchAndFilterCollection(MORNING_DELAYS_COLL) as Promise<MorningDelayRecord[]>;
+export async function getAllMorningDelayRecords(force: boolean = false): Promise<MorningDelayRecord[]> {
+  return fetchAndFilterCollection(MORNING_DELAYS_COLL, force) as Promise<MorningDelayRecord[]>;
 }
 
 // Subscribe to all morning delay records
@@ -2572,8 +2600,8 @@ export async function deleteStudentsBatch(ids: string[]): Promise<void> {
 }
 
 // Fetch all attendance for statistics
-export async function getAllAttendanceRecords(): Promise<AttendanceRecord[]> {
-  return fetchAndFilterCollection(ATTENDANCE_COLL) as Promise<AttendanceRecord[]>;
+export async function getAllAttendanceRecords(force: boolean = false): Promise<AttendanceRecord[]> {
+  return fetchAndFilterCollection(ATTENDANCE_COLL, force) as Promise<AttendanceRecord[]>;
 }
 
 // Subscribe to all attendance for real-time statistics
@@ -2584,8 +2612,8 @@ export function subscribeToAllAttendanceRecords(callback: (records: AttendanceRe
 }
 
 // Fetch all behavior records for statistics
-export async function getAllBehaviorRecords(): Promise<BehaviorRecord[]> {
-  const list = await fetchAndFilterCollection(BEHAVIORS_COLL);
+export async function getAllBehaviorRecords(force: boolean = false): Promise<BehaviorRecord[]> {
+  const list = await fetchAndFilterCollection(BEHAVIORS_COLL, force);
   return Array.isArray(list) ? (list as BehaviorRecord[]) : [];
 }
 
