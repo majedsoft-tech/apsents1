@@ -74,7 +74,16 @@ export function getDbForDatabaseId(databaseId?: string): Firestore {
 }
 
 const activeDbId = getActiveFirestoreDatabaseId();
-export const db: Firestore = getDbForDatabaseId(activeDbId);
+export let db: Firestore = getDbForDatabaseId(activeDbId);
+
+/**
+ * Switch active Firestore database reference dynamically and persist preference
+ */
+export function updateActiveDb(newId: string): Firestore {
+  setActiveFirestoreDatabaseId(newId);
+  db = getDbForDatabaseId(newId);
+  return db;
+}
 
 // Initialize Auth
 export const auth = getAuth(app);

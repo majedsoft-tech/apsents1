@@ -298,6 +298,8 @@ export default function App() {
         try {
           localStorage.setItem("last_active_school_owner", JSON.stringify({ uid: user.uid, email: user.email || "" }));
         } catch (_) {}
+        // Proactively refresh authoritative cloud data for this user on second device or reload
+        handleRefreshData().catch(() => {});
         // Automatic background sync for authenticated user
         syncAllLocalDataToFirestore().catch(() => {});
       } else {
@@ -767,12 +769,18 @@ export default function App() {
       if (user) {
         setCurrentUser(user);
         setActiveUser(user);
+        try {
+          localStorage.setItem("last_active_school_owner", JSON.stringify({ uid: user.uid, email: user.email || "" }));
+        } catch (_) {}
+        setLoading(true);
+        // Force refresh from Firestore in parallel for 100% sync
+        await handleRefreshData();
         await syncAllLocalDataToFirestore();
       }
       setAppMode("admin");
       setAdminTab("stats");
       localStorage.removeItem("last_admin_tab");
-      window.history.replaceState({ mode: "admin" }, "", "/?page=admin&tab=stats#/index");
+      window.history.replaceState({ mode: "admin" }, "", "/admin?page=admin&tab=stats#/admin");
       setIsSyncModalOpen(false);
     } catch (err: any) {
       console.error("Google Sign-In Error:", err);
@@ -1123,23 +1131,7 @@ export default function App() {
           {/* Google Login Button */}
           <button
             type="button"
-            onClick={async () => {
-              setLoginError(null);
-              try {
-                await signInWithPopup(auth, googleProvider);
-                setAppMode("admin");
-                setAdminTab("stats");
-                localStorage.removeItem("last_admin_tab");
-                window.history.replaceState({ mode: "admin" }, "", "/admin?page=admin&tab=stats#/admin");
-              } catch (err: any) {
-                console.error("Google Sign-In Error:", err);
-                if (err?.code === "auth/unauthorized-domain" || err?.message?.includes("unauthorized-domain")) {
-                  setLoginError("auth/unauthorized-domain");
-                } else {
-                  setLoginError(err?.message || "حدث خطأ أثناء تسجيل الدخول");
-                }
-              }
-            }}
+            onClick={handleGoogleLogin}
             className="w-full bg-white hover:bg-slate-100 text-slate-900 font-extrabold py-3.5 px-4 rounded-xl flex items-center justify-center gap-3 text-xs shadow-md transition-all duration-200 hover:scale-[1.01] active:scale-99 cursor-pointer"
           >
             {/* Google Vector Icon */}

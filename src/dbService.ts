@@ -20,9 +20,10 @@ import {
   auth as firebaseAuth, 
   getActiveFirestoreDatabaseId, 
   setActiveFirestoreDatabaseId, 
-  getDbForDatabaseId 
+  getDbForDatabaseId,
+  updateActiveDb
 } from "./firebase";
-export { getActiveFirestoreDatabaseId, setActiveFirestoreDatabaseId, getDbForDatabaseId };
+export { getActiveFirestoreDatabaseId, setActiveFirestoreDatabaseId, getDbForDatabaseId, updateActiveDb };
 
 import { Grade, Class, Teacher, Student, AttendanceRecord, BehaviorRecord, MorningDelayRecord, RegisteredUser } from "./types";
 
@@ -349,6 +350,7 @@ interface CollectionHub {
   latestData: any[];
   lastUpdated: number;
   cleanupTimer: any;
+  ownerKey?: string;
 }
 
 const collectionHubs = new Map<string, CollectionHub>();
@@ -540,6 +542,7 @@ export function clearUserSessionState(): void {
     try {
       localStorage.removeItem("school_name_cache");
       localStorage.removeItem("school_name_cached");
+      localStorage.removeItem("last_active_school_owner");
       localStorage.removeItem("own_school_admin_id");
       localStorage.removeItem("own_school_admin_email");
       localStorage.removeItem("linked_school_owner_id");
@@ -811,14 +814,23 @@ export async function syncAllLocalDataToFirestore(): Promise<{ count: number; su
     const msg = connErr?.message || String(connErr);
     const code = connErr?.code || "";
     if (msg.includes("does not exist") || msg.includes("NOT_FOUND") || code === "not-found") {
-      return {
-        count: 0,
-        success: false,
-        code: "DATABASE_NOT_FOUND",
-        message: "قاعدة بيانات Cloud Firestore لم يتم إنشاؤها بعد في مشروع Firebase (apsents1). يرجى فتح Firebase Console ثم اختيار Firestore Database والضغط على زر Create Database."
-      };
-    }
-    if (code === "permission-denied" || msg.includes("permission-denied")) {
+      const currentId = getActiveFirestoreDatabaseId();
+      const altId = currentId === "apsents1" ? "(default)" : "apsents1";
+      try {
+        const altDb = getDbForDatabaseId(altId);
+        const altPing = doc(altDb, SETTINGS_COLL, "_sync_connectivity_check");
+        await setDoc(altPing, { ping: Date.now(), uid, email }, { merge: true });
+        updateActiveDb(altId);
+        console.info(`Auto-detected and switched active Firestore database to: ${altId}`);
+      } catch (altErr) {
+        return {
+          count: 0,
+          success: false,
+          code: "DATABASE_NOT_FOUND",
+          message: "قاعدة بيانات Cloud Firestore لم يتم إنشاؤها بعد في مشروع Firebase (apsents1). يرجى فتح Firebase Console ثم اختيار Firestore Database والضغط على زر Create Database."
+        };
+      }
+    } else if (code === "permission-denied" || msg.includes("permission-denied")) {
       return {
         count: 0,
         success: false,
@@ -1209,6 +1221,30 @@ async function fetchAndFilterCollection(colName: string, force: boolean = false)
 
     return results;
   } catch (err: any) {
+    const msg = (err?.message || "").toLowerCase();
+    const code = err?.code || "";
+    if (code === "not-found" || msg.includes("does not exist") || msg.includes("not_found")) {
+      const currentId = getActiveFirestoreDatabaseId();
+      const altId = currentId === "apsents1" ? "(default)" : "apsents1";
+      try {
+        updateActiveDb(altId);
+        const altSnap = await getDocs(collection(db, colName));
+        const results: any[] = [];
+        const seenIds = new Set<string>();
+        altSnap.forEach(docSnap => {
+          const data = docSnap.data();
+          if (isDocBelongingToUser(data, currentUid, currentEmail) && !seenIds.has(docSnap.id)) {
+            seenIds.add(docSnap.id);
+            results.push({ ...data, id: docSnap.id, _docId: docSnap.id, _origId: (data as any)?.id });
+          }
+        });
+        setLocalItems(colName, results, currentUid);
+        const targetHub = getCollectionHub(colName);
+        targetHub.latestData = results;
+        targetHub.lastUpdated = Date.now();
+        return results;
+      } catch (_) {}
+    }
     handleFirestoreError(err);
     return localList;
   }
@@ -2586,6 +2622,49 @@ export async function getSchoolName(force: boolean = false): Promise<string> {
   }
 
   try {
+    // 1. Direct document lookup for instant speed (settings_<email> or settings_<uid>)
+    if (email) {
+      try {
+        const emailDocKey = `settings_${email.replace(/[^a-zA-Z0-9]/g, '_')}`;
+        const emailSnap = await getDoc(doc(db, SETTINGS_COLL, emailDocKey));
+        if (emailSnap.exists() && emailSnap.data()?.schoolName) {
+          const val = emailSnap.data().schoolName;
+          if (typeof window !== "undefined") {
+            localStorage.setItem(`school_name_${email}`, val);
+            if (uid) localStorage.setItem(`school_name_${uid}`, val);
+          }
+          return val;
+        }
+      } catch (_) {}
+    }
+
+    if (uid) {
+      try {
+        const uidSnap = await getDoc(doc(db, SETTINGS_COLL, `settings_${uid}`));
+        if (uidSnap.exists() && uidSnap.data()?.schoolName) {
+          const val = uidSnap.data().schoolName;
+          if (typeof window !== "undefined") {
+            if (email) localStorage.setItem(`school_name_${email}`, val);
+            localStorage.setItem(`school_name_${uid}`, val);
+          }
+          return val;
+        }
+      } catch (_) {}
+
+      try {
+        const userSnap = await getDoc(doc(db, USERS_COLL, uid));
+        if (userSnap.exists() && userSnap.data()?.schoolName) {
+          const val = userSnap.data().schoolName;
+          if (typeof window !== "undefined") {
+            if (email) localStorage.setItem(`school_name_${email}`, val);
+            localStorage.setItem(`school_name_${uid}`, val);
+          }
+          return val;
+        }
+      } catch (_) {}
+    }
+
+    // 2. Fallback scan of settings collection
     const querySnapshot = await getDocs(collection(db, SETTINGS_COLL));
     let schoolNameVal = "";
     querySnapshot.forEach(docSnap => {
@@ -2655,6 +2734,17 @@ function subscribeToCollection(colName: string, callback: (data: any[]) => void,
   }
 
   const hub = getCollectionHub(colName);
+  const currentOwnerKey = currentEmail || currentUid;
+
+  // If the hub was running under a different user/email, terminate the stale listener
+  if (hub.ownerKey && hub.ownerKey !== currentOwnerKey) {
+    if (hub.unsub) {
+      try { hub.unsub(); } catch (_) {}
+      hub.unsub = null;
+    }
+    hub.latestData = [];
+  }
+  hub.ownerKey = currentOwnerKey;
 
   // If there's a pending teardown timer, cancel it
   if (hub.cleanupTimer) {
@@ -2728,6 +2818,20 @@ function subscribeToCollection(colName: string, callback: (data: any[]) => void,
           } catch (_) {}
         }
       }, (error: any) => {
+        const msg = (error?.message || "").toLowerCase();
+        const code = error?.code || "";
+        if (code === "not-found" || msg.includes("does not exist") || msg.includes("not_found")) {
+          const currentId = getActiveFirestoreDatabaseId();
+          const altId = currentId === "apsents1" ? "(default)" : "apsents1";
+          console.warn(`Firestore database '${currentId}' not found in onSnapshot. Auto-switching to '${altId}'...`);
+          updateActiveDb(altId);
+          hub.unsub = null;
+          setTimeout(() => {
+            subscribeToCollection(colName, callback, onError);
+          }, 300);
+          return;
+        }
+
         const eff = getEffectiveUidAndEmail();
         const activeUid = eff.uid;
         const activeEmail = eff.email;
