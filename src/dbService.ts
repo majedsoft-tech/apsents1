@@ -37,29 +37,105 @@ const userProfileAliasCache = new Map<string, { uid: string; email: string; scho
 userProfileAliasCache.set("qgosybcp28mzmbyt92ah8vdgag33", { uid: "QgOSyBcP28MzmbJT92aH8vdgAG33", email: "majedsoft@gmail.com" });
 userProfileAliasCache.set("njxly7awt3txlyaijuvkkabjrovr1", { uid: "njxly7aWt3TxLYAIjUvkabjroVr1", email: "majedsoft@gmail.com" });
 
+// Canonical Grade Definitions for cross-device consistency
+export const CANONICAL_GRADES: Grade[] = [
+  { id: "grd_1787486478418_m1v1te7", name: "الاول", createdAt: 1 },
+  { id: "grd_1787486478419_kzbpntv", name: "الثاني", createdAt: 2 },
+  { id: "grd_1787486478421_zpivf6l", name: "الثالث", createdAt: 3 },
+];
+
+export const CANONICAL_GRADE_MAP: Record<string, string> = {
+  "grd_1787486478418_m1v1te7": "grd_1787486478418_m1v1te7",
+  "grd_1788615255472_k1th86n": "grd_1787486478418_m1v1te7",
+  "grd_1787424395700_694x0wh": "grd_1787486478418_m1v1te7",
+  "grd_1788235762109_91o41jx": "grd_1787486478418_m1v1te7",
+  "grd_1787486478419_kzbpntv": "grd_1787486478419_kzbpntv",
+  "grd_1788615255474_wdizmo7": "grd_1787486478419_kzbpntv",
+  "grd_1787424395700_62c4376": "grd_1787486478419_kzbpntv",
+  "grd_1787486478421_zpivf6l": "grd_1787486478421_zpivf6l",
+  "grd_1788615255474_yye100i": "grd_1787486478421_zpivf6l",
+  "grd_1787424395700_09h1uq4": "grd_1787486478421_zpivf6l",
+};
+
+// Canonical 16 Classes for cross-device consistency
+export const CANONICAL_CLASSES: Class[] = [
+  // الأول
+  { id: "cls_1787486481669_2x4wh9m", gradeId: "grd_1787486478418_m1v1te7", name: "الفصل 1" },
+  { id: "cls_1787486482643_rnx5wlj", gradeId: "grd_1787486478418_m1v1te7", name: "الفصل 2" },
+  { id: "cls_1787486483400_yuc7b8q", gradeId: "grd_1787486478418_m1v1te7", name: "الفصل 3" },
+  { id: "cls_1787486484164_nsqjt0r", gradeId: "grd_1787486478418_m1v1te7", name: "الفصل 4" },
+  { id: "cls_1787486484899_w1xtbsh", gradeId: "grd_1787486478418_m1v1te7", name: "الفصل 5" },
+  // الثاني
+  { id: "cls_1787486495096_57tzytm", gradeId: "grd_1787486478419_kzbpntv", name: "الفصل 1" },
+  { id: "cls_1787486495963_wb1s5bl", gradeId: "grd_1787486478419_kzbpntv", name: "الفصل 2" },
+  { id: "cls_1787486496714_60oev2x", gradeId: "grd_1787486478419_kzbpntv", name: "الفصل 3" },
+  { id: "cls_1787486497415_7he949g", gradeId: "grd_1787486478419_kzbpntv", name: "الفصل 4" },
+  { id: "cls_1787486498114_n5c95e8", gradeId: "grd_1787486478419_kzbpntv", name: "الفصل 5" },
+  { id: "cls_1787486498963_g2n01ns", gradeId: "grd_1787486478419_kzbpntv", name: "الفصل 6" },
+  // الثالث
+  { id: "cls_1787486501508_hbfxk7x", gradeId: "grd_1787486478421_zpivf6l", name: "الفصل 1" },
+  { id: "cls_1787486502966_j74kf43", gradeId: "grd_1787486478421_zpivf6l", name: "الفصل 2" },
+  { id: "cls_1787486503966_a9nb3rc", gradeId: "grd_1787486478421_zpivf6l", name: "الفصل 3" },
+  { id: "cls_1787486505030_sssv4o6", gradeId: "grd_1787486478421_zpivf6l", name: "الفصل 4" },
+  { id: "cls_1787486505867_qthqy83", gradeId: "grd_1787486478421_zpivf6l", name: "الفصل 5" },
+];
+
 // Fallback map for cross-device/interrupted student classId assignments
 export const CLASS_ID_FALLBACK_MAP: Record<string, { classId: string; gradeId: string }> = {
-  "cls_1788615258203_hcjbj4u": { classId: "cls_1787486481669_2x4wh9m", gradeId: "grd_1787486478418_m1v1te7" },
-  "cls_1788615259633_9ejpaz9": { classId: "cls_1787486482643_rnx5wlj", gradeId: "grd_1787486478418_m1v1te7" },
-  "cls_1788615260289_8cjn1yl": { classId: "cls_1787486483400_yuc7b8q", gradeId: "grd_1787486478418_m1v1te7" },
-  "cls_1788615262885_at116xm": { classId: "cls_1787486495096_57tzytm", gradeId: "grd_1787486478419_kzbpntv" },
-  "cls_1788615263431_mr7cod9": { classId: "cls_1787486495963_wb1s5bl", gradeId: "grd_1787486478419_kzbpntv" },
-  "cls_1788615264001_fryig9h": { classId: "cls_1787486496714_60oev2x", gradeId: "grd_1787486478419_kzbpntv" },
-  "cls_1788615265036_irgyxi7": { classId: "cls_1787486497415_7he949g", gradeId: "grd_1787486478419_kzbpntv" },
-  "cls_1788615269401_7eccbwh": { classId: "cls_1787486501508_hbfxk7x", gradeId: "grd_1787486478421_zpivf6l" },
+  // Canonical classes map to themselves
+  "cls_1787486481669_2x4wh9m": { classId: "cls_1787486481669_2x4wh9m", gradeId: "grd_1787486478418_m1v1te7" },
+  "cls_1787486482643_rnx5wlj": { classId: "cls_1787486482643_rnx5wlj", gradeId: "grd_1787486478418_m1v1te7" },
+  "cls_1787486483400_yuc7b8q": { classId: "cls_1787486483400_yuc7b8q", gradeId: "grd_1787486478418_m1v1te7" },
+  "cls_1787486484164_nsqjt0r": { classId: "cls_1787486484164_nsqjt0r", gradeId: "grd_1787486478418_m1v1te7" },
+  "cls_1787486484899_w1xtbsh": { classId: "cls_1787486484899_w1xtbsh", gradeId: "grd_1787486478418_m1v1te7" },
+  "cls_1787486495096_57tzytm": { classId: "cls_1787486495096_57tzytm", gradeId: "grd_1787486478419_kzbpntv" },
+  "cls_1787486495963_wb1s5bl": { classId: "cls_1787486495963_wb1s5bl", gradeId: "grd_1787486478419_kzbpntv" },
+  "cls_1787486496714_60oev2x": { classId: "cls_1787486496714_60oev2x", gradeId: "grd_1787486478419_kzbpntv" },
+  "cls_1787486497415_7he949g": { classId: "cls_1787486497415_7he949g", gradeId: "grd_1787486478419_kzbpntv" },
+  "cls_1787486498114_n5c95e8": { classId: "cls_1787486498114_n5c95e8", gradeId: "grd_1787486478419_kzbpntv" },
+  "cls_1787486498963_g2n01ns": { classId: "cls_1787486498963_g2n01ns", gradeId: "grd_1787486478419_kzbpntv" },
+  "cls_1787486501508_hbfxk7x": { classId: "cls_1787486501508_hbfxk7x", gradeId: "grd_1787486478421_zpivf6l" },
+  "cls_1787486502966_j74kf43": { classId: "cls_1787486502966_j74kf43", gradeId: "grd_1787486478421_zpivf6l" },
+  "cls_1787486503966_a9nb3rc": { classId: "cls_1787486503966_a9nb3rc", gradeId: "grd_1787486478421_zpivf6l" },
+  "cls_1787486505030_sssv4o6": { classId: "cls_1787486505030_sssv4o6", gradeId: "grd_1787486478421_zpivf6l" },
+  "cls_1787486505867_qthqy83": { classId: "cls_1787486505867_qthqy83", gradeId: "grd_1787486478421_zpivf6l" },
+  // Cross-device alias mappings for second device / alternative uploads
+  "cls_1788615257265_78tta7w": { classId: "cls_1787486481669_2x4wh9m", gradeId: "grd_1787486478418_m1v1te7" },
+  "cls_1788615258203_hcjbj4u": { classId: "cls_1787486482643_rnx5wlj", gradeId: "grd_1787486478418_m1v1te7" },
+  "cls_1788615258818_uestlim": { classId: "cls_1787486483400_yuc7b8q", gradeId: "grd_1787486478418_m1v1te7" },
+  "cls_1788615259633_9ejpaz9": { classId: "cls_1787486484164_nsqjt0r", gradeId: "grd_1787486478418_m1v1te7" },
+  "cls_1788615260289_8cjn1yl": { classId: "cls_1787486484899_w1xtbsh", gradeId: "grd_1787486478418_m1v1te7" },
+  "cls_1788615262369_bddp5w8": { classId: "cls_1787486495096_57tzytm", gradeId: "grd_1787486478419_kzbpntv" },
+  "cls_1788615262885_at116xm": { classId: "cls_1787486495963_wb1s5bl", gradeId: "grd_1787486478419_kzbpntv" },
+  "cls_1788615263431_mr7cod9": { classId: "cls_1787486496714_60oev2x", gradeId: "grd_1787486478419_kzbpntv" },
+  "cls_1788615264001_fryig9h": { classId: "cls_1787486497415_7he949g", gradeId: "grd_1787486478419_kzbpntv" },
+  "cls_1788615264550_0cx0xgt": { classId: "cls_1787486498114_n5c95e8", gradeId: "grd_1787486478419_kzbpntv" },
+  "cls_1788615265036_irgyxi7": { classId: "cls_1787486498963_g2n01ns", gradeId: "grd_1787486478419_kzbpntv" },
+  "cls_1788615267968_4hj4197": { classId: "cls_1787486501508_hbfxk7x", gradeId: "grd_1787486478421_zpivf6l" },
+  "cls_1788615268805_q9w2y9x": { classId: "cls_1787486502966_j74kf43", gradeId: "grd_1787486478421_zpivf6l" },
+  "cls_1788615269401_7eccbwh": { classId: "cls_1787486503966_a9nb3rc", gradeId: "grd_1787486478421_zpivf6l" },
+  "cls_1788615269965_kn8q6b9": { classId: "cls_1787486505030_sssv4o6", gradeId: "grd_1787486478421_zpivf6l" },
+  "cls_1788615270903_f26on4o": { classId: "cls_1787486505867_qthqy83", gradeId: "grd_1787486478421_zpivf6l" }
 };
 
 export function normalizeStudentData(student: any): any {
   if (!student) return student;
-  if (student.classId && CLASS_ID_FALLBACK_MAP[student.classId]) {
-    const mapped = CLASS_ID_FALLBACK_MAP[student.classId];
-    return {
-      ...student,
-      gradeId: mapped.gradeId,
-      classId: mapped.classId
-    };
+  let gradeId = student.gradeId;
+  let classId = student.classId;
+
+  if (classId && CLASS_ID_FALLBACK_MAP[classId]) {
+    const mapped = CLASS_ID_FALLBACK_MAP[classId];
+    gradeId = mapped.gradeId;
+    classId = mapped.classId;
+  } else if (gradeId && CANONICAL_GRADE_MAP[gradeId]) {
+    gradeId = CANONICAL_GRADE_MAP[gradeId];
   }
-  return student;
+
+  return {
+    ...student,
+    gradeId,
+    classId
+  };
 }
 
 export function setActiveUser(user: any) {
@@ -1311,34 +1387,38 @@ async function fetchAndFilterCollection(colName: string, force: boolean = false)
 export async function getGrades(force: boolean = false): Promise<Grade[]> {
   const rawGrades = (await fetchAndFilterCollection(GRADES_COLL, force)) as Grade[];
   const safeGrades = Array.isArray(rawGrades) ? rawGrades : [];
-  const seen = new Set<string>();
-  const uniqueGrades: Grade[] = [];
+  
+  const result: Grade[] = CANONICAL_GRADES.map(g => ({ ...g }));
+  const seen = new Set(["الاول", "الأول", "الثاني", "الثالث"]);
   for (const g of safeGrades) {
     if (!g || !g.id) continue;
-    const key = g.name?.trim();
-    if (!seen.has(key)) {
+    const key = (g.name || "").replace(/[أإآ]/g, "ا").trim();
+    if (key && !seen.has(key)) {
       seen.add(key);
-      uniqueGrades.push(g);
+      result.push(g);
     }
   }
-  return uniqueGrades;
+  return result;
 }
 
 // Fetch All Classes
 export async function getClasses(force: boolean = false): Promise<Class[]> {
   const rawClasses = (await fetchAndFilterCollection(CLASSES_COLL, force)) as Class[];
   const safeClasses = Array.isArray(rawClasses) ? rawClasses : [];
-  const seen = new Set<string>();
-  const uniqueClasses: Class[] = [];
+  
+  const result: Class[] = CANONICAL_CLASSES.map(c => ({ ...c }));
+  const seen = new Set(CANONICAL_CLASSES.map(c => `${c.gradeId}_${(c.name || "").trim()}`));
+
   for (const c of safeClasses) {
     if (!c || !c.id) continue;
-    const key = `${c.gradeId}_${c.name?.trim()}`;
+    const gradeId = CANONICAL_GRADE_MAP[c.gradeId] || c.gradeId;
+    const key = `${gradeId}_${(c.name || "").trim()}`;
     if (!seen.has(key)) {
       seen.add(key);
-      uniqueClasses.push(c);
+      result.push({ ...c, gradeId });
     }
   }
-  return uniqueClasses;
+  return result;
 }
 
 // Fetch All Teachers
@@ -1361,7 +1441,17 @@ export async function getTeachers(force: boolean = false): Promise<Teacher[]> {
 export async function getStudents(force: boolean = false): Promise<Student[]> {
   const list = await fetchAndFilterCollection(STUDENTS_COLL, force);
   const safeList = Array.isArray(list) ? (list as Student[]) : [];
-  return safeList.map(normalizeStudentData);
+  const normalized = safeList.map(normalizeStudentData);
+  const seenNames = new Set<string>();
+  const uniqueStudents: Student[] = [];
+  for (const s of normalized) {
+    if (!s) continue;
+    const nameKey = (s.name || "").trim().toLowerCase();
+    if (!nameKey || seenNames.has(nameKey)) continue;
+    seenNames.add(nameKey);
+    uniqueStudents.push(s);
+  }
+  return uniqueStudents;
 }
 
 // Fetch Students by Grade and Class
@@ -2935,17 +3025,17 @@ function subscribeToCollection(colName: string, callback: (data: any[]) => void,
 export function subscribeToGrades(callback: (grades: Grade[]) => void, onError?: (error: any) => void) {
   return subscribeToCollection(GRADES_COLL, (rawGrades) => {
     const safeGrades = Array.isArray(rawGrades) ? rawGrades : [];
-    const seen = new Set<string>();
-    const uniqueGrades: Grade[] = [];
+    const result: Grade[] = CANONICAL_GRADES.map(g => ({ ...g }));
+    const seen = new Set(["الاول", "الأول", "الثاني", "الثالث"]);
     for (const g of safeGrades) {
       if (!g || !g.id) continue;
-      const key = g.name?.trim();
-      if (!seen.has(key)) {
+      const key = (g.name || "").replace(/[أإآ]/g, "ا").trim();
+      if (key && !seen.has(key)) {
         seen.add(key);
-        uniqueGrades.push(g);
+        result.push(g);
       }
     }
-    callback(uniqueGrades);
+    callback(result);
   }, onError);
 }
 
@@ -2953,17 +3043,19 @@ export function subscribeToGrades(callback: (grades: Grade[]) => void, onError?:
 export function subscribeToClasses(callback: (classes: Class[]) => void, onError?: (error: any) => void) {
   return subscribeToCollection(CLASSES_COLL, (rawClasses) => {
     const safeClasses = Array.isArray(rawClasses) ? rawClasses : [];
-    const seen = new Set<string>();
-    const uniqueClasses: Class[] = [];
+    const result: Class[] = CANONICAL_CLASSES.map(c => ({ ...c }));
+    const seen = new Set(CANONICAL_CLASSES.map(c => `${c.gradeId}_${(c.name || "").trim()}`));
+
     for (const c of safeClasses) {
       if (!c || !c.id) continue;
-      const key = `${c.gradeId}_${c.name?.trim()}`;
+      const gradeId = CANONICAL_GRADE_MAP[c.gradeId] || c.gradeId;
+      const key = `${gradeId}_${(c.name || "").trim()}`;
       if (!seen.has(key)) {
         seen.add(key);
-        uniqueClasses.push(c);
+        result.push({ ...c, gradeId });
       }
     }
-    callback(uniqueClasses);
+    callback(result);
   }, onError);
 }
 
@@ -2988,7 +3080,17 @@ export function subscribeToTeachers(callback: (teachers: Teacher[]) => void, onE
 export function subscribeToStudents(callback: (students: Student[]) => void, onError?: (error: any) => void) {
   return subscribeToCollection(STUDENTS_COLL, (data) => {
     const list = Array.isArray(data) ? data : [];
-    callback(list.map(normalizeStudentData));
+    const normalized = list.map(normalizeStudentData);
+    const seenNames = new Set<string>();
+    const uniqueStudents: Student[] = [];
+    for (const s of normalized) {
+      if (!s) continue;
+      const nameKey = (s.name || "").trim().toLowerCase();
+      if (!nameKey || seenNames.has(nameKey)) continue;
+      seenNames.add(nameKey);
+      uniqueStudents.push(s);
+    }
+    callback(uniqueStudents);
   }, onError);
 }
 

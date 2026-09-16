@@ -387,6 +387,21 @@ export default function App() {
     });
   };
 
+  const deduplicateStudents = (arr: Student[]): Student[] => {
+    if (!Array.isArray(arr)) return [];
+    const seenNames = new Set<string>();
+    const seenIds = new Set<string>();
+    return arr.filter(student => {
+      if (!student) return false;
+      const cleanName = (student.name || "").trim().toLowerCase();
+      if (cleanName && seenNames.has(cleanName)) return false;
+      if (student.id && seenIds.has(student.id)) return false;
+      if (cleanName) seenNames.add(cleanName);
+      if (student.id) seenIds.add(student.id);
+      return true;
+    });
+  };
+
   const deduplicateClasses = (arr: Class[]): Class[] => {
     if (!Array.isArray(arr)) return [];
     const seenIds = new Set<string>();
@@ -499,7 +514,7 @@ export default function App() {
       // 5. Subscribe to Students
       unsubStudents = subscribeToStudents((newStudents) => {
         const safeList = Array.isArray(newStudents) ? newStudents : [];
-        setStudents(deduplicateById(safeList));
+        setStudents(deduplicateStudents(safeList));
       });
 
       // 6. Real-time live subscriptions for Attendance, Delays, and Behaviors to keep counts and stats updated instantly across all tabs
@@ -625,7 +640,7 @@ export default function App() {
       const sortedTeachers = uniqueTeachers.sort((a, b) => a.name.localeCompare(b.name, "ar"));
       setTeachers(sortedTeachers);
 
-      setStudents(deduplicateById(s));
+      setStudents(deduplicateStudents(s));
       try {
         window.dispatchEvent(new CustomEvent("school_refresh_stats"));
       } catch (_) {}
