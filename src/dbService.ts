@@ -628,6 +628,97 @@ if (typeof window !== "undefined") {
   });
 }
 
+// Real-time server synchronization helper (Express /api/sync)
+export async function postToServerSync(endpoint: string, payload: any): Promise<void> {
+  if (typeof window === "undefined") return;
+  try {
+    await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+  } catch (_) {}
+}
+
+let serverSyncEngineInitialized = false;
+
+export function initServerSyncEngine(): void {
+  if (typeof window === "undefined" || serverSyncEngineInitialized) return;
+  serverSyncEngineInitialized = true;
+
+  const schoolCode = getSchoolCode();
+  const eff = getEffectiveUidAndEmail();
+  const queryParams = new URLSearchParams();
+  if (schoolCode) queryParams.set("schoolCode", schoolCode);
+  if (eff.email) queryParams.set("email", eff.email);
+  if (eff.uid) queryParams.set("uid", eff.uid);
+
+  // 1. Connect to SSE stream for 0ms instant broadcast from other devices
+  try {
+    const sseUrl = `/api/sync/stream?${queryParams.toString()}`;
+    const evtSource = new EventSource(sseUrl);
+
+    evtSource.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data);
+        if (payload.type === "attendance_updated") {
+          const items = Array.isArray(payload.data) ? payload.data : [payload.data];
+          items.forEach(item => {
+            if (item && item.id) {
+              saveOrUpdateLocalItem(ATTENDANCE_COLL, item);
+            }
+          });
+        } else if (payload.type === "behavior_updated") {
+          const items = Array.isArray(payload.data) ? payload.data : [payload.data];
+          items.forEach(item => {
+            if (item && item.id) {
+              saveOrUpdateLocalItem(BEHAVIORS_COLL, item);
+            }
+          });
+        } else if (payload.type === "delay_updated") {
+          const items = Array.isArray(payload.data) ? payload.data : [payload.data];
+          items.forEach(item => {
+            if (item && item.id) {
+              saveOrUpdateLocalItem(MORNING_DELAYS_COLL, item);
+            }
+          });
+        }
+      } catch (_) {}
+    };
+
+    evtSource.onerror = () => {
+      evtSource.close();
+    };
+  } catch (_) {}
+
+  // 2. Periodic polling sync fallback every 3 seconds to guarantee cross-device updates
+  const pollServer = async () => {
+    try {
+      const code = getSchoolCode();
+      const currentEff = getEffectiveUidAndEmail();
+      const q = new URLSearchParams();
+      if (code) q.set("schoolCode", code);
+      if (currentEff.email) q.set("email", currentEff.email);
+      if (currentEff.uid) q.set("uid", currentEff.uid);
+
+      const res = await fetch(`/api/sync/attendance?${q.toString()}`);
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && Array.isArray(json.records)) {
+          json.records.forEach((record: any) => {
+            if (record && record.id) {
+              saveOrUpdateLocalItem(ATTENDANCE_COLL, record);
+            }
+          });
+        }
+      }
+    } catch (_) {}
+  };
+
+  pollServer();
+  setInterval(pollServer, 3500);
+}
+
 function getCollectionHub(colName: string): CollectionHub {
   let hub = collectionHubs.get(colName);
   if (!hub) {
@@ -1330,13 +1421,21 @@ if (typeof window !== "undefined") {
   } catch (_) {}
 }
 
-// Execute Firestore write safely with instant non-blocking return (0-200ms)
-async function safeFirestoreWrite(promise: Promise<any>, timeoutMs: number = 200): Promise<void> {
+// Execute Firestore write safely with non-blocking error handling
+async function safeFirestoreWrite(promise: Promise<any>, timeoutMs: number = 2500): Promise<void> {
   try {
-    await Promise.race([
-      promise,
-      new Promise(resolve => setTimeout(resolve, timeoutMs))
-    ]);
+    let timer: any;
+    const timeoutPromise = new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, timeoutMs);
+    });
+
+    // Always attach catch handler to underlying promise to avoid unhandled rejections
+    promise.catch((err) => {
+      handleFirestoreError(err);
+    });
+
+    await Promise.race([promise, timeoutPromise]);
+    clearTimeout(timer);
   } catch (err: any) {
     handleFirestoreError(err);
   }
@@ -1482,7 +1581,34 @@ async function fetchAndFilterCollection(colName: string, force: boolean = false)
       }
     });
 
-    // Update local cache and hub with authoritative Firestore data
+    // Also merge server-synced records (guarantees cross-device sync even if Firestore quota is exceeded)
+    try {
+      const code = getSchoolCode();
+      const q = new URLSearchParams();
+      if (code) q.set("schoolCode", code);
+      if (currentEmail) q.set("email", currentEmail);
+      if (currentUid) q.set("uid", currentUid);
+      
+      const serverEndpoint = colName === ATTENDANCE_COLL ? "/api/sync/attendance" :
+                             colName === BEHAVIORS_COLL ? "/api/sync/behaviors" :
+                             colName === MORNING_DELAYS_COLL ? "/api/sync/delays" : null;
+      if (serverEndpoint) {
+        const sRes = await fetch(`${serverEndpoint}?${q.toString()}`);
+        if (sRes.ok) {
+          const sJson = await sRes.json();
+          if (sJson.success && Array.isArray(sJson.records)) {
+            sJson.records.forEach((sItem: any) => {
+              if (sItem && sItem.id && !seenIds.has(sItem.id)) {
+                seenIds.add(sItem.id);
+                results.push(sItem);
+              }
+            });
+          }
+        }
+      }
+    } catch (_) {}
+
+    // Update local cache and hub with authoritative data
     setLocalItems(colName, results, currentUid);
     const targetHub = getCollectionHub(colName);
     targetHub.latestData = results;
@@ -1494,25 +1620,26 @@ async function fetchAndFilterCollection(colName: string, force: boolean = false)
     const code = err?.code || "";
     if (code === "not-found" || msg.includes("does not exist") || msg.includes("not_found")) {
       const currentId = getActiveFirestoreDatabaseId();
-      const altId = currentId === "apsents1" ? "(default)" : "apsents1";
-      try {
-        updateActiveDb(altId);
-        const altSnap = await getDocs(collection(db, colName));
-        const results: any[] = [];
-        const seenIds = new Set<string>();
-        altSnap.forEach(docSnap => {
-          const data = docSnap.data();
-          if (isDocBelongingToUser(data, currentUid, currentEmail) && !seenIds.has(docSnap.id)) {
-            seenIds.add(docSnap.id);
-            results.push({ ...data, id: docSnap.id, _docId: docSnap.id, _origId: (data as any)?.id });
-          }
-        });
-        setLocalItems(colName, results, currentUid);
-        const targetHub = getCollectionHub(colName);
-        targetHub.latestData = results;
-        targetHub.lastUpdated = Date.now();
-        return results;
-      } catch (_) {}
+      if (currentId !== "(default)") {
+        try {
+          updateActiveDb("(default)");
+          const altSnap = await getDocs(collection(db, colName));
+          const results: any[] = [];
+          const seenIds = new Set<string>();
+          altSnap.forEach(docSnap => {
+            const data = docSnap.data();
+            if (isDocBelongingToUser(data, currentUid, currentEmail) && !seenIds.has(docSnap.id)) {
+              seenIds.add(docSnap.id);
+              results.push({ ...data, id: docSnap.id, _docId: docSnap.id, _origId: (data as any)?.id });
+            }
+          });
+          setLocalItems(colName, results, currentUid);
+          const targetHub = getCollectionHub(colName);
+          targetHub.latestData = results;
+          targetHub.lastUpdated = Date.now();
+          return results;
+        } catch (_) {}
+      }
     }
     handleFirestoreError(err);
     return localList;
@@ -1705,9 +1832,12 @@ export async function saveAttendanceRecord(record: Omit<AttendanceRecord, "id" |
   // 1. Save to local storage cache immediately (0ms)
   saveOrUpdateLocalItem(ATTENDANCE_COLL, fullRecord, uid);
 
-  // 2. Persist to Firestore (safeguarded non-blocking timeout)
+  // 2. Real-time multi-device server sync (guarantees cross-device sync even if Firestore quota is exceeded)
+  postToServerSync("/api/sync/attendance", { record: fullRecord });
+
+  // 3. Persist to Firestore (safeguarded non-blocking timeout)
   const docRef = doc(db, ATTENDANCE_COLL, recordId);
-  await safeFirestoreWrite(setDoc(docRef, fullRecord, { merge: true }), 250);
+  await safeFirestoreWrite(setDoc(docRef, fullRecord, { merge: true }), 2500);
 }
 
 // Delete entire Attendance Record (Instant local update + real-time Firestore delete)
@@ -1884,9 +2014,12 @@ export async function saveBehaviorRecord(record: Omit<BehaviorRecord, "id" | "ti
   // 1. Instant local update (0ms)
   saveOrUpdateLocalItem(BEHAVIORS_COLL, fullRecord, uid);
 
-  // 2. Firestore write
+  // 2. Real-time server sync
+  postToServerSync("/api/sync/behaviors", { record: fullRecord });
+
+  // 3. Firestore write
   const docRef = doc(db, BEHAVIORS_COLL, newId);
-  await safeFirestoreWrite(setDoc(docRef, fullRecord, { merge: true }), 200);
+  await safeFirestoreWrite(setDoc(docRef, fullRecord, { merge: true }), 2500);
 
   return newId;
 }
@@ -1979,9 +2112,12 @@ export async function saveMorningDelayRecord(record: Omit<MorningDelayRecord, "i
   // 1. Instant local cache update (0ms)
   saveOrUpdateLocalItem(MORNING_DELAYS_COLL, fullRecord, uid);
 
-  // 2. Real-time Firestore write (safeguarded non-blocking timeout)
+  // 2. Real-time server sync
+  postToServerSync("/api/sync/delays", { record: fullRecord });
+
+  // 3. Real-time Firestore write (safeguarded non-blocking timeout)
   const docRef = doc(db, MORNING_DELAYS_COLL, recordId);
-  await safeFirestoreWrite(setDoc(docRef, fullRecord, { merge: true }), 200);
+  await safeFirestoreWrite(setDoc(docRef, fullRecord, { merge: true }), 2500);
 
   return recordId;
 }
@@ -2022,9 +2158,10 @@ export async function saveMorningDelaysBatch(records: Omit<MorningDelayRecord, "
   const schoolCode = getSchoolCode();
 
   // Local cache update
+  const fullRecords: any[] = [];
   records.forEach(r => {
     const recordId = `delay_${r.date}_${r.studentId}`;
-    saveOrUpdateLocalItem(MORNING_DELAYS_COLL, {
+    const full = {
       ...r,
       id: recordId,
       userId: uid,
@@ -2032,8 +2169,13 @@ export async function saveMorningDelaysBatch(records: Omit<MorningDelayRecord, "
       schoolCode,
       timestamp: Date.now(),
       updatedAt: Date.now()
-    }, uid);
+    };
+    fullRecords.push(full);
+    saveOrUpdateLocalItem(MORNING_DELAYS_COLL, full, uid);
   });
+
+  // Real-time server sync
+  postToServerSync("/api/sync/delays", { records: fullRecords });
 
   const batch = writeBatch(db);
   for (const record of records) {
@@ -2049,7 +2191,7 @@ export async function saveMorningDelaysBatch(records: Omit<MorningDelayRecord, "
       updatedAt: Date.now()
     }, { merge: true });
   }
-  await safeFirestoreWrite(batch.commit(), 300);
+  await safeFirestoreWrite(batch.commit(), 3000);
 }
 
 // Delete Morning Delay Record (Instant local purge + real-time Firestore multi-doc delete)

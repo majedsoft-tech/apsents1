@@ -34,7 +34,16 @@ export const app: FirebaseApp = getApps().length > 0 ? getApp() : initializeApp(
 export function getActiveFirestoreDatabaseId(): string {
   if (typeof window !== "undefined") {
     const saved = localStorage.getItem("firestore_custom_database_id");
-    if (saved && saved.trim()) return saved.trim();
+    // "apsents1" is the GCP project ID, not the database ID. In Firestore the default database is always "(default)".
+    // Connecting to "apsents1" as a database ID causes 5 NOT_FOUND errors.
+    if (saved && saved.trim() && saved.trim() !== "apsents1" && saved.trim() !== "(default)") {
+      return saved.trim();
+    }
+    if (saved === "apsents1") {
+      try {
+        localStorage.removeItem("firestore_custom_database_id");
+      } catch (_) {}
+    }
   }
   return "(default)";
 }

@@ -30,7 +30,8 @@ import {
   importSchoolBackupData,
   testCloudFirestoreConnection,
   getSchoolCode,
-  setSchoolCode
+  setSchoolCode,
+  initServerSyncEngine
 } from "./dbService";
 import { Grade, Class, Teacher, Student } from "./types";
 import TeacherPortal from "./components/TeacherPortal";
@@ -278,6 +279,9 @@ export default function App() {
 
   // Setup real-time subscribers for grades, classes, teachers, and students to keep data synced instantly
   useEffect(() => {
+    // Start real-time server synchronization engine
+    initServerSyncEngine();
+
     const searchParams = new URLSearchParams(window.location.search);
     const hashIndex = window.location.hash.indexOf("?");
     const hashParams = hashIndex !== -1 ? new URLSearchParams(window.location.hash.substring(hashIndex)) : null;
@@ -341,8 +345,6 @@ export default function App() {
         } catch (_) {}
         // Proactively refresh authoritative cloud data for this user on second device or reload
         handleRefreshData().catch(() => {});
-        // Automatic background sync for authenticated user
-        syncAllLocalDataToFirestore().catch(() => {});
       } else {
         // If accessed via direct link with code/owner/email params, initialize proxy user for direct viewing
         if (effectiveCode) {
@@ -623,10 +625,7 @@ export default function App() {
   const handleRefreshData = async () => {
     setIsRefreshingData(true);
     try {
-      // 1. Sync any pending offline records to Firestore in background (non-blocking)
-      syncAllLocalDataToFirestore().catch(() => {});
-
-      // 2. Force fetch authoritative state directly from Firestore (in parallel)
+      // 1. Force fetch authoritative state directly from Firestore (in parallel)
       const [g, c, t, s, sn] = await Promise.all([
         getGrades(true),
         getClasses(true),
@@ -743,10 +742,6 @@ export default function App() {
   };
 
   const handleCopyStatsLink = () => {
-    // 1. Synchronize in background (non-blocking)
-    syncAllLocalDataToFirestore().catch(() => {});
-    
-    // 2. Perform copy immediately in user interaction thread
     const statsLink = buildSharedUrl("stats-only", "tab=stats");
     copyTextToClipboard(statsLink).then((ok) => {
       if (ok) {
@@ -757,10 +752,6 @@ export default function App() {
   };
 
   const handleCopyTeacherLink = () => {
-    // 1. Synchronize in background (non-blocking)
-    syncAllLocalDataToFirestore().catch(() => {});
-    
-    // 2. Perform copy immediately in user interaction thread
     const teacherLink = buildSharedUrl("teacher", "tab=attendance");
     copyTextToClipboard(teacherLink).then((ok) => {
       if (ok) {
@@ -771,10 +762,6 @@ export default function App() {
   };
 
   const handleCopyMorningDelayLink = () => {
-    // 1. Synchronize in background (non-blocking)
-    syncAllLocalDataToFirestore().catch(() => {});
-    
-    // 2. Perform copy immediately in user interaction thread
     const delayLink = buildSharedUrl("morning-delay");
     copyTextToClipboard(delayLink).then((ok) => {
       if (ok) {
@@ -785,7 +772,6 @@ export default function App() {
   };
 
   const handleCopyAdminSyncLink = () => {
-    syncAllLocalDataToFirestore().catch(() => {});
     const adminLink = buildSharedUrl("admin", "page=admin&tab=stats");
     copyTextToClipboard(adminLink).then((ok) => {
       if (ok) {
