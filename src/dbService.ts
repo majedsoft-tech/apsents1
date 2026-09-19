@@ -170,6 +170,51 @@ export function setActiveUser(user: any) {
  * If unauthenticated with no link params, returns empty credentials.
  */
 export function getEffectiveUidAndEmail(): { uid: string; email: string; isGuest?: boolean } {
+  // 1. Check URL parameters directly if available in browser (highest priority for shared portal links)
+  if (typeof window !== "undefined") {
+    try {
+      const searchParams = new URLSearchParams(window.location.search);
+      const hashIndex = window.location.hash.indexOf("?");
+      const hashParams = hashIndex !== -1 ? new URLSearchParams(window.location.hash.substring(hashIndex)) : null;
+      const schoolCodeParam = (searchParams.get("schoolCode") || searchParams.get("code") || searchParams.get("schoolId") || hashParams?.get("schoolCode") || hashParams?.get("code") || hashParams?.get("schoolId") || "").trim();
+      const ownerParam = (searchParams.get("owner") || searchParams.get("ownerId") || searchParams.get("uid") || hashParams?.get("owner") || hashParams?.get("ownerId") || hashParams?.get("uid") || schoolCodeParam).trim();
+      const emailParam = (searchParams.get("email") || searchParams.get("ownerEmail") || searchParams.get("userEmail") || hashParams?.get("email") || hashParams?.get("ownerEmail") || hashParams?.get("userEmail") || (schoolCodeParam.includes("@") ? schoolCodeParam : "")).trim().toLowerCase();
+
+      if (ownerParam || emailParam) {
+        if (ownerParam) {
+          userProfileAliasCache.set(ownerParam.toLowerCase(), { uid: ownerParam, email: emailParam });
+        }
+        if (emailParam) {
+          userProfileAliasCache.set(emailParam.toLowerCase(), { uid: ownerParam, email: emailParam });
+        }
+        try {
+          localStorage.setItem("last_active_school_owner", JSON.stringify({ uid: ownerParam, email: emailParam }));
+          if (schoolCodeParam || ownerParam) {
+            localStorage.setItem("linked_school_owner_id", schoolCodeParam || ownerParam);
+            localStorage.setItem("school_unique_code", schoolCodeParam || ownerParam);
+          }
+        } catch (_) {}
+        return {
+          uid: ownerParam,
+          email: emailParam,
+          isGuest: false
+        };
+      }
+    } catch (e) {}
+  }
+
+  // 2. Active User Proxy (set when linking a school code or switching context)
+  if (activeUserProxy && (activeUserProxy.uid || activeUserProxy.email)) {
+    const pUid = activeUserProxy.uid || "";
+    const pEmail = (activeUserProxy.email || "").toLowerCase();
+    return {
+      uid: pUid,
+      email: pEmail,
+      isGuest: false
+    };
+  }
+
+  // 3. Authenticated Firebase Auth user
   if (firebaseAuth.currentUser) {
     const cUid = firebaseAuth.currentUser.uid;
     const cEmail = firebaseAuth.currentUser.email?.toLowerCase() || "";
@@ -186,46 +231,20 @@ export function getEffectiveUidAndEmail(): { uid: string; email: string; isGuest
     };
   }
 
-  if (activeUserProxy && (activeUserProxy.uid || activeUserProxy.email)) {
-    const pUid = activeUserProxy.uid || "";
-    const pEmail = (activeUserProxy.email || "").toLowerCase();
-    return {
-      uid: pUid,
-      email: pEmail,
-      isGuest: false
-    };
-  }
-
-  // Check URL parameters directly if available in browser
+  // 4. Stored linked school owner across independent links and tabs
   if (typeof window !== "undefined") {
     try {
-      const searchParams = new URLSearchParams(window.location.search);
-      const hashIndex = window.location.hash.indexOf("?");
-      const hashParams = hashIndex !== -1 ? new URLSearchParams(window.location.hash.substring(hashIndex)) : null;
-      const ownerParam = (searchParams.get("owner") || searchParams.get("ownerId") || searchParams.get("uid") || hashParams?.get("owner") || hashParams?.get("ownerId") || hashParams?.get("uid") || "").trim();
-      const emailParam = (searchParams.get("email") || searchParams.get("ownerEmail") || searchParams.get("userEmail") || hashParams?.get("email") || hashParams?.get("ownerEmail") || hashParams?.get("userEmail") || "").trim().toLowerCase();
-      if (ownerParam || emailParam) {
-        if (ownerParam) {
-          userProfileAliasCache.set(ownerParam.toLowerCase(), { uid: ownerParam, email: emailParam });
-        }
-        if (emailParam) {
-          userProfileAliasCache.set(emailParam.toLowerCase(), { uid: ownerParam, email: emailParam });
-        }
-        try {
-          localStorage.setItem("last_active_school_owner", JSON.stringify({ uid: ownerParam, email: emailParam }));
-        } catch (_) {}
+      const linked = localStorage.getItem("linked_school_owner_id");
+      if (linked && linked.trim()) {
+        const cleanLinked = linked.trim();
+        const isEmail = cleanLinked.includes("@");
+        const cached = userProfileAliasCache.get(cleanLinked.toLowerCase());
         return {
-          uid: ownerParam,
-          email: emailParam,
+          uid: isEmail ? (cached?.uid || cleanLinked) : cleanLinked,
+          email: isEmail ? cleanLinked.toLowerCase() : (cached?.email || `owner_${cleanLinked}@school.com`),
           isGuest: false
         };
       }
-    } catch (e) {}
-  }
-
-  // Fallback to persisted last active school owner across independent links and tabs
-  if (typeof window !== "undefined") {
-    try {
       const rawOwner = localStorage.getItem("last_active_school_owner");
       if (rawOwner) {
         const parsed = JSON.parse(rawOwner);
@@ -244,6 +263,19 @@ export function getEffectiveUidAndEmail(): { uid: string; email: string; isGuest
     } catch (_) {}
   }
 
+  // 5. Fallback to own local admin ID
+  if (typeof window !== "undefined") {
+    const ownId = (localStorage.getItem("own_school_admin_id") || "").trim();
+    const ownEmail = (localStorage.getItem("own_school_admin_email") || "").trim().toLowerCase();
+    if (ownId || ownEmail) {
+      return {
+        uid: ownId,
+        email: ownEmail,
+        isGuest: true
+      };
+    }
+  }
+
   // Default to empty credentials for unauthenticated visitors
   return {
     uid: "",
@@ -252,15 +284,90 @@ export function getEffectiveUidAndEmail(): { uid: string; email: string; isGuest
   };
 }
 
+// Get the canonical School Code for cross-device linking and syncing
+export function getSchoolCode(): string {
+  if (typeof window !== "undefined") {
+    // 1. Check current URL params first for explicit active link context
+    try {
+      const searchParams = new URLSearchParams(window.location.search);
+      const hashIndex = window.location.hash.indexOf("?");
+      const hashParams = hashIndex !== -1 ? new URLSearchParams(window.location.hash.substring(hashIndex)) : null;
+      const urlCode = (searchParams.get("schoolCode") || searchParams.get("code") || searchParams.get("schoolId") || hashParams?.get("schoolCode") || hashParams?.get("code") || hashParams?.get("schoolId") || "").trim();
+      if (urlCode) return urlCode;
+    } catch (_) {}
+
+    // 2. Check explicitly linked school owner ID
+    const linked = localStorage.getItem("linked_school_owner_id");
+    if (linked && linked.trim()) return linked.trim();
+
+    // 3. Check custom school code
+    const custom = localStorage.getItem("school_unique_code");
+    if (custom && custom.trim()) return custom.trim();
+  }
+
+  // 4. Authenticated Google Email
+  const eff = getEffectiveUidAndEmail();
+  if (eff.email && !eff.email.endsWith("@school.com")) {
+    return eff.email;
+  }
+  // 5. Authenticated UID
+  if (eff.uid && eff.uid !== "school_admin") {
+    return eff.uid;
+  }
+
+  // 6. Local admin credentials
+  if (typeof window !== "undefined") {
+    const ownEmail = (localStorage.getItem("own_school_admin_email") || "").trim();
+    if (ownEmail && !ownEmail.endsWith("@school.com")) return ownEmail;
+    const ownId = (localStorage.getItem("own_school_admin_id") || "").trim();
+    if (ownId) return ownId;
+  }
+
+  return getOrCreateOwnSchoolAdminId();
+}
+
+export function setSchoolCode(code: string): void {
+  if (typeof window === "undefined" || !code) return;
+  const cleanCode = code.trim();
+  try {
+    localStorage.setItem("school_unique_code", cleanCode);
+    localStorage.setItem("linked_school_owner_id", cleanCode);
+  } catch (_) {}
+  setLinkedSchoolOwnerId(cleanCode);
+}
+
 export function getOrCreateOwnSchoolAdminId(): string {
   const eff = getEffectiveUidAndEmail();
-  return eff.uid || "";
+  if (eff.uid) return eff.uid;
+  if (typeof window !== "undefined") {
+    let stored = localStorage.getItem("own_school_admin_id");
+    if (!stored) {
+      stored = `school_${Math.random().toString(36).substring(2, 9)}`;
+      localStorage.setItem("own_school_admin_id", stored);
+    }
+    return stored;
+  }
+  return "school_admin";
 }
 
 export function setLinkedSchoolOwnerId(id: string): void {
-  // Sets proxy if provided
   if (id) {
-    activeUserProxy = { uid: id, email: id.includes("@") ? id : `owner_${id}@school.com` };
+    const cleanId = id.trim();
+    const isEmail = cleanId.includes("@");
+    const cached = userProfileAliasCache.get(cleanId.toLowerCase());
+    activeUserProxy = {
+      uid: isEmail ? (cached?.uid || cleanId) : cleanId,
+      email: isEmail ? cleanId.toLowerCase() : (cached?.email || `owner_${cleanId}@school.com`),
+      displayName: "المعلم / المشرف",
+      isGuest: false
+    };
+    if (typeof window !== "undefined") {
+      try {
+        localStorage.setItem("linked_school_owner_id", cleanId);
+        localStorage.setItem("school_unique_code", cleanId);
+        localStorage.setItem("last_active_school_owner", JSON.stringify(activeUserProxy));
+      } catch (_) {}
+    }
   }
 }
 
@@ -471,18 +578,25 @@ if (typeof window !== "undefined" && typeof BroadcastChannel !== "undefined") {
         const eff = getEffectiveUidAndEmail();
         const myEmail = (eff.email || "").toLowerCase().trim();
         const myUid = (eff.uid || "").trim();
+        const mySchoolCode = getSchoolCode().toLowerCase().trim();
         const msgEmail = (data.ownerEmail || "").toLowerCase().trim();
         const msgUid = (data.ownerUid || "").trim();
+        const msgSchoolCode = (data.schoolCode || "").toLowerCase().trim();
 
-        // Enforce strict tenant isolation: only accept broadcasts if matching current email, UID, alias, or current context
-        const isMatch = (myEmail && msgEmail && myEmail === msgEmail) || 
+        // Enforce strict tenant isolation: only accept broadcasts if matching current email, UID, alias, schoolCode, or current context
+        const isMatch = (mySchoolCode && msgSchoolCode && mySchoolCode === msgSchoolCode) ||
+                        (mySchoolCode && msgEmail && mySchoolCode === msgEmail) ||
+                        (myEmail && msgSchoolCode && myEmail === msgSchoolCode) ||
+                        (mySchoolCode && msgUid && mySchoolCode === msgUid) ||
+                        (myUid && msgSchoolCode && myUid === msgSchoolCode) ||
+                        (myEmail && msgEmail && myEmail === msgEmail) || 
                         (myUid && msgUid && myUid === msgUid) ||
                         (myEmail && msgUid && userProfileAliasCache.get(myEmail)?.uid === msgUid) ||
                         (myUid && msgEmail && userProfileAliasCache.get(myUid.toLowerCase())?.email === msgEmail) ||
-                        (!myEmail && !myUid && (msgEmail || msgUid));
+                        (!myEmail && !myUid && (msgEmail || msgUid || msgSchoolCode));
 
         if (isMatch) {
-          if (Array.isArray(data.items) && (myUid || myEmail || msgUid || msgEmail)) {
+          if (Array.isArray(data.items) && (myUid || myEmail || msgUid || msgEmail || mySchoolCode)) {
             setLocalItems(data.colName, data.items, myUid || msgUid);
           }
           notifyCollectionSubscribers(data.colName, data.items, true);
@@ -560,6 +674,7 @@ function notifyCollectionSubscribers(colName: string, items?: any[], fromBroadca
         items: dataToBroadcast,
         ownerEmail: currentEmail,
         ownerUid: currentUid,
+        schoolCode: getSchoolCode(),
         timestamp: Date.now()
       });
     } catch (_) {}
@@ -573,12 +688,27 @@ export function isDocBelongingToUser(data: any, currentUid?: string, currentEmai
   const eff = getEffectiveUidAndEmail();
   const targetEmail = (currentEmail || eff.email || "").toLowerCase().trim();
   const targetUid = (currentUid || eff.uid || "").trim();
+  const targetSchoolCode = getSchoolCode().trim();
 
   // If no user context exists, no private user document should be accessible
-  if (!targetEmail && !targetUid) return false;
+  if (!targetEmail && !targetUid && !targetSchoolCode) return false;
 
   const docEmail = (data.userEmail || data.email || data.schoolEmail || data.ownerEmail || "").toLowerCase().trim();
   const docUid = (data.userId || data.uid || data.ownerId || data.owner || "").trim();
+  const docSchoolCode = (data.schoolCode || data.school_code || "").trim();
+
+  // 0. Primary Match on School Code (direct cross-device & independent link synchronization)
+  if (targetSchoolCode) {
+    const normTarget = targetSchoolCode.toLowerCase();
+    if (docSchoolCode && docSchoolCode.toLowerCase() === normTarget) return true;
+    if (docEmail && docEmail === normTarget) return true;
+    if (docUid && docUid.toLowerCase() === normTarget) return true;
+  }
+  if (docSchoolCode) {
+    const normDoc = docSchoolCode.toLowerCase();
+    if (targetEmail && targetEmail === normDoc) return true;
+    if (targetUid && targetUid.toLowerCase() === normDoc) return true;
+  }
 
   // 1. Direct match on Email
   if (targetEmail && docEmail && targetEmail === docEmail) {
@@ -637,6 +767,12 @@ export function isDocBelongingToUser(data: any, currentUid?: string, currentEmai
   }
   if (targetUid && docId && targetUid !== "school_admin") {
     if (docId.includes(`_${targetUid}_`) || docId.startsWith(`att_${targetUid}`) || docId.startsWith(`delay_${targetUid}`)) {
+      return true;
+    }
+  }
+  if (targetSchoolCode && docId) {
+    const safeCode = targetSchoolCode.replace(/[^a-zA-Z0-9]/g, '_');
+    if (docId.includes(`_${safeCode}_`) || docId.startsWith(`att_${safeCode}`) || docId.startsWith(`delay_${safeCode}`)) {
       return true;
     }
   }
@@ -1561,6 +1697,7 @@ export async function saveAttendanceRecord(record: Omit<AttendanceRecord, "id" |
     id: recordId,
     userId: uid,
     userEmail: email,
+    schoolCode: getSchoolCode(),
     timestamp: Date.now(),
     updatedAt: Date.now()
   };
@@ -1739,6 +1876,7 @@ export async function saveBehaviorRecord(record: Omit<BehaviorRecord, "id" | "ti
     id: newId,
     userId: uid,
     userEmail: email,
+    schoolCode: getSchoolCode(),
     timestamp: Date.now(),
     updatedAt: Date.now()
   };
@@ -1833,6 +1971,7 @@ export async function saveMorningDelayRecord(record: Omit<MorningDelayRecord, "i
     id: recordId,
     userId: uid,
     userEmail: email,
+    schoolCode: getSchoolCode(),
     timestamp: Date.now(),
     updatedAt: Date.now()
   };
@@ -1880,6 +2019,8 @@ export async function saveMorningDelaysBatch(records: Omit<MorningDelayRecord, "
     }
   }
 
+  const schoolCode = getSchoolCode();
+
   // Local cache update
   records.forEach(r => {
     const recordId = `delay_${r.date}_${r.studentId}`;
@@ -1888,6 +2029,7 @@ export async function saveMorningDelaysBatch(records: Omit<MorningDelayRecord, "
       id: recordId,
       userId: uid,
       userEmail: email,
+      schoolCode,
       timestamp: Date.now(),
       updatedAt: Date.now()
     }, uid);
@@ -1902,6 +2044,7 @@ export async function saveMorningDelaysBatch(records: Omit<MorningDelayRecord, "
       id: recordId,
       userId: uid,
       userEmail: email,
+      schoolCode,
       timestamp: Date.now(),
       updatedAt: Date.now()
     }, { merge: true });
@@ -1924,9 +2067,10 @@ export async function deleteMorningDelayRecord(
 
   if ((!targetDate || !targetStudentId) && id && id.startsWith("delay_")) {
     const parts = id.split("_");
-    if (parts.length >= 3 && /^\d{4}-\d{2}-\d{2}$/.test(parts[1])) {
-      if (!targetDate) targetDate = parts[1];
-      if (!targetStudentId) targetStudentId = parts.slice(2).join("_");
+    const dateIdx = parts.findIndex(p => /^\d{4}-\d{2}-\d{2}$/.test(p));
+    if (dateIdx !== -1) {
+      if (!targetDate) targetDate = parts[dateIdx];
+      if (!targetStudentId) targetStudentId = parts.slice(dateIdx + 1).join("_");
     }
   }
 
@@ -2852,6 +2996,7 @@ export async function saveSchoolName(schoolName: string): Promise<void> {
   if (!uid && !email) return;
 
   const trimmed = schoolName.trim();
+  const schoolCode = getSchoolCode();
 
   if (typeof window !== "undefined") {
     if (email) localStorage.setItem(`school_name_${email}`, trimmed);
@@ -2859,22 +3004,22 @@ export async function saveSchoolName(schoolName: string): Promise<void> {
   }
 
   // 1. Instant local-first cache update & broadcast across tabs (0ms)
-  saveOrUpdateLocalItem(SETTINGS_COLL, { schoolName: trimmed, userId: uid, userEmail: email, updatedAt: Date.now() }, uid);
+  saveOrUpdateLocalItem(SETTINGS_COLL, { schoolName: trimmed, userId: uid, userEmail: email, schoolCode, updatedAt: Date.now() }, uid);
 
   // 2. Persist to Firestore
   const docKey = email ? `settings_${email.replace(/[^a-zA-Z0-9]/g, '_')}` : `settings_${uid}`;
   const docRef = doc(db, SETTINGS_COLL, docKey);
-  await safeFirestoreWrite(setDoc(docRef, { schoolName: trimmed, userId: uid, userEmail: email, updatedAt: Date.now() }, { merge: true }), 200);
+  await safeFirestoreWrite(setDoc(docRef, { schoolName: trimmed, userId: uid, userEmail: email, schoolCode, updatedAt: Date.now() }, { merge: true }), 200);
 
   if (uid && docKey !== `settings_${uid}`) {
     const uidDocRef = doc(db, SETTINGS_COLL, `settings_${uid}`);
-    await safeFirestoreWrite(setDoc(uidDocRef, { schoolName: trimmed, userId: uid, userEmail: email, updatedAt: Date.now() }, { merge: true }), 200);
+    await safeFirestoreWrite(setDoc(uidDocRef, { schoolName: trimmed, userId: uid, userEmail: email, schoolCode, updatedAt: Date.now() }, { merge: true }), 200);
   }
 
   if (uid) {
     try {
       const userRef = doc(db, USERS_COLL, uid);
-      await setDoc(userRef, { schoolName: trimmed, lastLogin: Date.now() }, { merge: true });
+      await setDoc(userRef, { schoolName: trimmed, schoolCode, lastLogin: Date.now() }, { merge: true });
     } catch (_) {}
   }
 }
@@ -2970,6 +3115,7 @@ function subscribeToCollection(colName: string, callback: (data: any[]) => void,
               items: results,
               ownerEmail: activeEmail,
               ownerUid: activeUid,
+              schoolCode: getSchoolCode(),
               timestamp: Date.now()
             });
           } catch (_) {}

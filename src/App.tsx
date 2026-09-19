@@ -28,7 +28,9 @@ import {
   restoreGradeDefaultClasses,
   downloadSchoolBackupFile,
   importSchoolBackupData,
-  testCloudFirestoreConnection
+  testCloudFirestoreConnection,
+  getSchoolCode,
+  setSchoolCode
 } from "./dbService";
 import { Grade, Class, Teacher, Student } from "./types";
 import TeacherPortal from "./components/TeacherPortal";
@@ -281,23 +283,57 @@ export default function App() {
     const hashParams = hashIndex !== -1 ? new URLSearchParams(window.location.hash.substring(hashIndex)) : null;
 
     const pageParam = searchParams.get("page") || hashParams?.get("page") || "";
+    const schoolCodeParam = searchParams.get("schoolCode") || searchParams.get("code") || searchParams.get("schoolId") || hashParams?.get("schoolCode") || hashParams?.get("code") || hashParams?.get("schoolId") || "";
     const ownerParam = searchParams.get("owner") || searchParams.get("ownerId") || searchParams.get("uid") || hashParams?.get("owner") || hashParams?.get("ownerId") || hashParams?.get("uid") || "";
     const emailParam = searchParams.get("email") || searchParams.get("ownerEmail") || searchParams.get("userEmail") || hashParams?.get("email") || hashParams?.get("ownerEmail") || hashParams?.get("userEmail") || "";
     const schoolParam = searchParams.get("school") || searchParams.get("schoolName") || hashParams?.get("school") || hashParams?.get("schoolName") || "";
+
+    const effectiveCode = (schoolCodeParam || ownerParam || emailParam || "").trim();
 
     if (schoolParam) {
       const decodedSchool = decodeURIComponent(schoolParam);
       setSchoolName(decodedSchool);
     }
 
+    if (effectiveCode) {
+      setSchoolCode(effectiveCode);
+      setLinkedSchoolOwnerId(effectiveCode);
+      resolveOwnerProfileFromDb(effectiveCode).then((resolved) => {
+        if (resolved) {
+          const directUser = {
+            uid: resolved.uid,
+            email: resolved.email,
+            displayName: resolved.schoolName || "المعلم / المشرف",
+            isGuest: false
+          };
+          setActiveUser(directUser);
+          setCurrentUser(directUser);
+          if (resolved.schoolName) {
+            setSchoolName(resolved.schoolName);
+          }
+          handleRefreshData().catch(() => {});
+        }
+      }).catch(() => {});
+    }
+
     const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
+      const isPortalPage = appMode === "teacher" || appMode === "morning-delay" || appMode === "stats-only";
+      
       if (user) {
+        // If accessed via an independent school link on a portal page, preserve the linked school identity
+        if (effectiveCode && isPortalPage) {
+          console.log("Preserving independent link school context:", effectiveCode);
+          setAuthChecking(false);
+          return;
+        }
+
         setCurrentUser(user);
         setActiveUser(user);
         try {
           localStorage.setItem("last_active_school_owner", JSON.stringify({ uid: user.uid, email: user.email || "" }));
           if (user.email) {
             localStorage.setItem("own_school_admin_email", user.email);
+            setSchoolCode(user.email);
           }
           if (user.uid) {
             localStorage.setItem("own_school_admin_id", user.uid);
@@ -308,18 +344,18 @@ export default function App() {
         // Automatic background sync for authenticated user
         syncAllLocalDataToFirestore().catch(() => {});
       } else {
-        // If accessed via direct link with owner/email params, initialize proxy user for direct viewing
-        if (ownerParam || emailParam) {
+        // If accessed via direct link with code/owner/email params, initialize proxy user for direct viewing
+        if (effectiveCode) {
           const directUser = {
-            uid: ownerParam,
-            email: emailParam,
+            uid: ownerParam || effectiveCode,
+            email: emailParam || (effectiveCode.includes("@") ? effectiveCode : `owner_${effectiveCode}@school.com`),
             displayName: "المعلم / المشرف",
             isGuest: false
           };
           setActiveUser(directUser);
           setCurrentUser(directUser);
           try {
-            localStorage.setItem("last_active_school_owner", JSON.stringify({ uid: ownerParam, email: emailParam }));
+            localStorage.setItem("last_active_school_owner", JSON.stringify({ uid: directUser.uid, email: directUser.email }));
           } catch (_) {}
         } else {
           let restoredUser: any = null;
@@ -653,12 +689,16 @@ export default function App() {
   };
 
   const buildSharedUrl = (pageValue: string, extraParams: string = "") => {
+    const schoolCode = getSchoolCode();
     const ownerId = currentUser?.uid || auth.currentUser?.uid || localStorage.getItem("own_school_admin_id") || getOrCreateOwnSchoolAdminId();
     const ownerEmail = currentUser?.email || auth.currentUser?.email || localStorage.getItem("own_school_admin_email") || "";
     
+    const cleanSchoolCode = schoolCode || ownerEmail || ownerId;
+
     let query = `page=${pageValue}`;
     if (extraParams) query += `&${extraParams}`;
-    if (ownerId) query += `&owner=${encodeURIComponent(ownerId)}`;
+    if (cleanSchoolCode) query += `&schoolCode=${encodeURIComponent(cleanSchoolCode)}&code=${encodeURIComponent(cleanSchoolCode)}`;
+    if (ownerId) query += `&owner=${encodeURIComponent(ownerId)}&uid=${encodeURIComponent(ownerId)}`;
     if (ownerEmail && !ownerEmail.endsWith("@school.com")) query += `&email=${encodeURIComponent(ownerEmail)}`;
     if (schoolName) query += `&school=${encodeURIComponent(schoolName)}`;
 
@@ -668,7 +708,7 @@ export default function App() {
       : pageValue === "teacher" ? "/teacher" 
       : "/";
 
-    return `${window.location.origin}${targetPath}?${query}#/${pageValue}`;
+    return `${window.location.origin}${targetPath}?${query}#/${pageValue}?${query}`;
   };
 
   // Robust clipboard copy function with textarea fallback for iframes and permissions
@@ -879,25 +919,30 @@ export default function App() {
 
     try {
       let targetCode = rawInput.trim();
-      // If a full URL was pasted, extract owner or email parameter
+      // If a full URL was pasted, extract schoolCode, owner, or email parameter
       if (targetCode.includes("?") || targetCode.includes("#")) {
         try {
           const urlObj = new URL(targetCode.startsWith("http") ? targetCode : `https://${targetCode}`);
+          const pCode = urlObj.searchParams.get("schoolCode") || urlObj.searchParams.get("code") || urlObj.searchParams.get("schoolId");
           const pOwner = urlObj.searchParams.get("owner") || urlObj.searchParams.get("ownerId") || urlObj.searchParams.get("uid");
           const pEmail = urlObj.searchParams.get("email") || urlObj.searchParams.get("ownerEmail");
-          if (pOwner) targetCode = decodeURIComponent(pOwner);
+          if (pCode) targetCode = decodeURIComponent(pCode);
+          else if (pOwner) targetCode = decodeURIComponent(pOwner);
           else if (pEmail) targetCode = decodeURIComponent(pEmail);
           else if (urlObj.hash.includes("?")) {
             const hashIdx = urlObj.hash.indexOf("?");
             const hashParams = new URLSearchParams(urlObj.hash.substring(hashIdx));
+            const hCode = hashParams.get("schoolCode") || hashParams.get("code") || hashParams.get("schoolId");
             const hOwner = hashParams.get("owner") || hashParams.get("ownerId") || hashParams.get("uid");
             const hEmail = hashParams.get("email") || hashParams.get("ownerEmail");
-            if (hOwner) targetCode = decodeURIComponent(hOwner);
+            if (hCode) targetCode = decodeURIComponent(hCode);
+            else if (hOwner) targetCode = decodeURIComponent(hOwner);
             else if (hEmail) targetCode = decodeURIComponent(hEmail);
           }
         } catch (e) {}
       }
 
+      setSchoolCode(targetCode);
       setLinkedSchoolOwnerId(targetCode);
 
       // Attempt to resolve profile from DB or use clean ID
@@ -1961,6 +2006,7 @@ export default function App() {
         isOpen={isShareModalOpen}
         onClose={() => setIsShareModalOpen(false)}
         schoolName={schoolName}
+        schoolCode={getSchoolCode()}
         onCopyTeacherLink={handleCopyTeacherLink}
         teacherCopied={teacherCopied}
         onCopyDelayLink={handleCopyMorningDelayLink}

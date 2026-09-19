@@ -15,6 +15,7 @@ interface ShareLinksModalProps {
   isOpen: boolean;
   onClose: () => void;
   schoolName: string;
+  schoolCode?: string;
   onCopyTeacherLink: () => void;
   teacherCopied: boolean;
   onCopyDelayLink: () => void;
@@ -37,6 +38,7 @@ export default function ShareLinksModal({
   isOpen,
   onClose,
   schoolName,
+  schoolCode,
   onCopyTeacherLink,
   teacherCopied,
   onCopyDelayLink,
@@ -74,8 +76,19 @@ export default function ShareLinksModal({
 
         {/* Modal Body */}
         <div className="p-5 space-y-4 max-h-[78vh] overflow-y-auto">
+          {schoolCode && (
+            <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-3 flex items-center justify-between text-xs">
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                <span className="font-bold text-emerald-950">معرّف المدرسة المرتبط:</span>
+                <code className="bg-white px-2 py-0.5 rounded-lg border border-emerald-200 font-mono font-bold text-emerald-800 text-[11px]">{schoolCode}</code>
+              </div>
+              <span className="text-[10px] text-emerald-700 font-bold">مزامنة نشطة</span>
+            </div>
+          )}
+
           <p className="text-xs text-slate-700 font-bold leading-relaxed">
-            اختر الرابط المناسب لنسخه ومشاركته عبر WhatsApp أو فتحه على أي جهاز كمبيوتر وجوال:
+            جميع الروابط أدناه مربوطة تلقائياً بمعرف مدرستكم، بحيث يظهر أي غياب أو تأخير مسجل فوراً في لوحة التحكم الرئيسية ومتابعة النسب:
           </p>
 
           {/* 1. Teachers Attendance Link */}

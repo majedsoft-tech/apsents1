@@ -2,17 +2,20 @@ export interface Grade {
   id: string;
   name: string;
   createdAt?: any;
+  schoolCode?: string;
 }
 
 export interface Class {
   id: string;
   name: string;
   gradeId: string;
+  schoolCode?: string;
 }
 
 export interface Teacher {
   id: string;
   name: string;
+  schoolCode?: string;
 }
 
 export interface Student {
@@ -20,6 +23,7 @@ export interface Student {
   name: string;
   gradeId: string;
   classId: string;
+  schoolCode?: string;
 }
 
 export interface AttendanceRecord {
@@ -40,6 +44,7 @@ export interface AttendanceRecord {
   timestamp: any;
   userId?: string;
   userEmail?: string;
+  schoolCode?: string;
 }
 
 export interface BehaviorRecord {
@@ -54,6 +59,7 @@ export interface BehaviorRecord {
   updatedAt?: any;
   userId?: string;
   userEmail?: string;
+  schoolCode?: string;
 }
 
 export interface MorningDelayRecord {
@@ -74,6 +80,7 @@ export interface MorningDelayRecord {
   updatedAt?: any;
   userId?: string;
   userEmail?: string;
+  schoolCode?: string;
 }
 
 export interface RegisteredUser {
@@ -85,6 +92,7 @@ export interface RegisteredUser {
   lastLogin: number;
   createdAt: number;
   schoolName: string;
+  schoolCode?: string;
   status: "نشط" | "موقوف";
   // Counters for display
   gradesCount?: number;
