@@ -274,12 +274,35 @@ export function getEffectiveUidAndEmail(): { uid: string; email: string; isGuest
         isGuest: true
       };
     }
+
+    // 6. Check if any cached school owner or admin ID exists in localStorage
+    const cachedAdmin = localStorage.getItem("own_school_admin_id") || localStorage.getItem("last_active_school_owner");
+    if (cachedAdmin) {
+      try {
+        if (cachedAdmin.startsWith("{")) {
+          const parsed = JSON.parse(cachedAdmin);
+          if (parsed && (parsed.uid || parsed.email)) {
+            return {
+              uid: (parsed.uid || "").trim(),
+              email: (parsed.email || "").toLowerCase().trim(),
+              isGuest: true
+            };
+          }
+        } else {
+          return {
+            uid: cachedAdmin.trim(),
+            email: "",
+            isGuest: true
+          };
+        }
+      } catch (_) {}
+    }
   }
 
-  // Default to empty credentials for unauthenticated visitors
+  // Guaranteed persistent fallback context for shared links so school data never gets orphaned
   return {
-    uid: "",
-    email: "",
+    uid: "guest_school_admin",
+    email: "admin@school.local",
     isGuest: true
   };
 }
@@ -461,10 +484,16 @@ function setLocalItems(colName: string, items: any[], uid?: string) {
     const json = JSON.stringify(safeItems);
 
     if (currentEmail) {
-      localStorage.setItem(`school_offline_cache_${currentEmail}_${colName}`, json);
+      const k1 = `school_offline_cache_${currentEmail}_${colName}`;
+      if (localStorage.getItem(k1) !== json) {
+        localStorage.setItem(k1, json);
+      }
     }
     if (currentUid) {
-      localStorage.setItem(`school_offline_cache_${currentUid}_${colName}`, json);
+      const k2 = `school_offline_cache_${currentUid}_${colName}`;
+      if (localStorage.getItem(k2) !== json) {
+        localStorage.setItem(k2, json);
+      }
     }
   } catch (e) {}
 }
@@ -483,6 +512,32 @@ function saveOrUpdateLocalItem(colName: string, item: any, uid?: string) {
   }
   setLocalItems(colName, safeItems, currentUid);
   notifyCollectionSubscribers(colName, safeItems);
+}
+
+function bulkSaveOrUpdateLocalItems(colName: string, itemsToSave: any[], uid?: string) {
+  const eff = getEffectiveUidAndEmail();
+  const currentUid = uid || eff.uid || "";
+  if ((!currentUid && !eff.email) || !Array.isArray(itemsToSave) || itemsToSave.length === 0) return;
+
+  const currentItems = getLocalItems(colName, currentUid);
+  const safeItems = Array.isArray(currentItems) ? [...currentItems] : [];
+  
+  let changed = false;
+  itemsToSave.forEach(item => {
+    if (!item || !item.id) return;
+    const idx = safeItems.findIndex(i => i && (i.id === item.id || (i._docId && i._docId === item.id)));
+    if (idx >= 0) {
+      safeItems[idx] = { ...safeItems[idx], ...item };
+    } else {
+      safeItems.push(item);
+    }
+    changed = true;
+  });
+
+  if (changed) {
+    setLocalItems(colName, safeItems, currentUid);
+    notifyCollectionSubscribers(colName, safeItems);
+  }
 }
 
 function removeLocalItem(colName: string, id: string, uid?: string) {
@@ -560,6 +615,7 @@ interface CollectionHub {
   unsub: (() => void) | null;
   callbacks: Set<(items: any[]) => void>;
   latestData: any[];
+  latestSerialized?: string;
   lastUpdated: number;
   cleanupTimer: any;
   ownerKey?: string;
@@ -596,9 +652,6 @@ if (typeof window !== "undefined" && typeof BroadcastChannel !== "undefined") {
                         (!myEmail && !myUid && (msgEmail || msgUid || msgSchoolCode));
 
         if (isMatch) {
-          if (Array.isArray(data.items) && (myUid || myEmail || msgUid || msgEmail || mySchoolCode)) {
-            setLocalItems(data.colName, data.items, myUid || msgUid);
-          }
           notifyCollectionSubscribers(data.colName, data.items, true);
         }
       }
@@ -606,9 +659,13 @@ if (typeof window !== "undefined" && typeof BroadcastChannel !== "undefined") {
   } catch (e) {}
 }
 
-// Storage event listener fallback (for iframes / cross-tab contexts)
+// Storage event listener fallback (for iframes / cross-tab contexts when BroadcastChannel is unavailable)
 if (typeof window !== "undefined") {
+  let storageDebounceTimer: any = null;
   window.addEventListener("storage", (e) => {
+    // If BroadcastChannel is actively working, ignore storage events to avoid redundant duplicate notifications
+    if (realTimeSyncChannel) return;
+
     if (e.key && e.key.startsWith("school_offline_cache_")) {
       const parts = e.key.split("_");
       const colName = parts[parts.length - 1];
@@ -621,7 +678,10 @@ if (typeof window !== "undefined") {
         const matchesUser = (currentEmail && e.key.includes(`_${currentEmail}_`)) || 
                             (currentUid && e.key.includes(`_${currentUid}_`));
         if (matchesUser) {
-          notifyCollectionSubscribers(colName, undefined, true);
+          clearTimeout(storageDebounceTimer);
+          storageDebounceTimer = setTimeout(() => {
+            notifyCollectionSubscribers(colName, undefined, true);
+          }, 200);
         }
       }
     }
@@ -663,25 +723,61 @@ export function initServerSyncEngine(): void {
         const payload = JSON.parse(event.data);
         if (payload.type === "attendance_updated") {
           const items = Array.isArray(payload.data) ? payload.data : [payload.data];
-          items.forEach(item => {
-            if (item && item.id) {
-              saveOrUpdateLocalItem(ATTENDANCE_COLL, item);
-            }
-          });
+          bulkSaveOrUpdateLocalItems(ATTENDANCE_COLL, items);
         } else if (payload.type === "behavior_updated") {
           const items = Array.isArray(payload.data) ? payload.data : [payload.data];
-          items.forEach(item => {
-            if (item && item.id) {
-              saveOrUpdateLocalItem(BEHAVIORS_COLL, item);
-            }
-          });
+          bulkSaveOrUpdateLocalItems(BEHAVIORS_COLL, items);
         } else if (payload.type === "delay_updated") {
           const items = Array.isArray(payload.data) ? payload.data : [payload.data];
-          items.forEach(item => {
-            if (item && item.id) {
-              saveOrUpdateLocalItem(MORNING_DELAYS_COLL, item);
-            }
-          });
+          bulkSaveOrUpdateLocalItems(MORNING_DELAYS_COLL, items);
+        } else if (payload.type === "school_updated") {
+          const newSchoolName = payload.data?.schoolName || (typeof payload.data === "string" ? payload.data : "");
+          if (newSchoolName) {
+            const currentEff = getEffectiveUidAndEmail();
+            if (currentEff.email) localStorage.setItem(`school_name_${currentEff.email}`, newSchoolName);
+            if (currentEff.uid) localStorage.setItem(`school_name_${currentEff.uid}`, newSchoolName);
+            localStorage.setItem("school_name_cache", newSchoolName);
+            localStorage.setItem("school_name_cached", newSchoolName);
+            window.dispatchEvent(new CustomEvent("school_name_updated", { detail: newSchoolName }));
+          }
+        } else if (payload.type === "grades_updated") {
+          if (Array.isArray(payload.data?.deletedIds)) {
+            payload.data.deletedIds.forEach((delId: string) => {
+              removeLocalItemsBy(GRADES_COLL, g => g.id === delId || g._docId === delId);
+            });
+          }
+          if (Array.isArray(payload.data?.records)) {
+            bulkSaveOrUpdateLocalItems(GRADES_COLL, payload.data.records);
+          }
+        } else if (payload.type === "classes_updated") {
+          if (Array.isArray(payload.data?.deletedIds)) {
+            payload.data.deletedIds.forEach((delId: string) => {
+              removeLocalItemsBy(CLASSES_COLL, c => c.id === delId || c._docId === delId);
+            });
+          }
+          if (Array.isArray(payload.data?.records)) {
+            bulkSaveOrUpdateLocalItems(CLASSES_COLL, payload.data.records);
+          }
+        } else if (payload.type === "teachers_updated") {
+          if (Array.isArray(payload.data?.deletedIds)) {
+            payload.data.deletedIds.forEach((delId: string) => {
+              removeLocalItemsBy(TEACHERS_COLL, t => t.id === delId || t._docId === delId);
+            });
+          }
+          if (Array.isArray(payload.data?.records)) {
+            bulkSaveOrUpdateLocalItems(TEACHERS_COLL, payload.data.records);
+          }
+        } else if (payload.type === "students_updated") {
+          if (Array.isArray(payload.data?.deletedIds)) {
+            payload.data.deletedIds.forEach((delId: string) => {
+              removeLocalItemsBy(STUDENTS_COLL, s => s.id === delId || s._docId === delId);
+            });
+          }
+          if (Array.isArray(payload.data?.records)) {
+            bulkSaveOrUpdateLocalItems(STUDENTS_COLL, payload.data.records);
+          }
+        } else if (payload.type === "bootstrap_updated") {
+          pollServer();
         }
       } catch (_) {}
     };
@@ -691,7 +787,7 @@ export function initServerSyncEngine(): void {
     };
   } catch (_) {}
 
-  // 2. Periodic polling sync fallback every 3 seconds to guarantee cross-device updates
+  // 2. Periodic unified polling sync fallback to guarantee cross-device updates without main thread freezing
   const pollServer = async () => {
     try {
       const code = getSchoolCode();
@@ -701,22 +797,126 @@ export function initServerSyncEngine(): void {
       if (currentEff.email) q.set("email", currentEff.email);
       if (currentEff.uid) q.set("uid", currentEff.uid);
 
-      const res = await fetch(`/api/sync/attendance?${q.toString()}`);
+      const res = await fetch(`/api/sync/all?${q.toString()}`);
       if (res.ok) {
         const json = await res.json();
-        if (json.success && Array.isArray(json.records)) {
-          json.records.forEach((record: any) => {
-            if (record && record.id) {
-              saveOrUpdateLocalItem(ATTENDANCE_COLL, record);
+        if (json.success) {
+          // School Name Sync
+          if (json.schoolName) {
+            const curName = localStorage.getItem("school_name_cache");
+            if (curName !== json.schoolName) {
+              if (currentEff.email) localStorage.setItem(`school_name_${currentEff.email}`, json.schoolName);
+              if (currentEff.uid) localStorage.setItem(`school_name_${currentEff.uid}`, json.schoolName);
+              localStorage.setItem("school_name_cache", json.schoolName);
+              localStorage.setItem("school_name_cached", json.schoolName);
+              window.dispatchEvent(new CustomEvent("school_name_updated", { detail: json.schoolName }));
             }
-          });
+          }
+
+          // Grades Sync (Bulk diff check)
+          if (Array.isArray(json.grades) && json.grades.length > 0) {
+            const cur = getLocalItems(GRADES_COLL, currentEff.uid);
+            if (JSON.stringify(cur) !== JSON.stringify(json.grades)) {
+              setLocalItems(GRADES_COLL, json.grades, currentEff.uid);
+              notifyCollectionSubscribers(GRADES_COLL, json.grades);
+            }
+          }
+
+          // Classes Sync (Bulk diff check)
+          if (Array.isArray(json.classes) && json.classes.length > 0) {
+            const cur = getLocalItems(CLASSES_COLL, currentEff.uid);
+            if (JSON.stringify(cur) !== JSON.stringify(json.classes)) {
+              setLocalItems(CLASSES_COLL, json.classes, currentEff.uid);
+              notifyCollectionSubscribers(CLASSES_COLL, json.classes);
+            }
+          }
+
+          // Teachers Sync (Bulk diff check)
+          if (Array.isArray(json.teachers) && json.teachers.length > 0) {
+            const cur = getLocalItems(TEACHERS_COLL, currentEff.uid);
+            if (JSON.stringify(cur) !== JSON.stringify(json.teachers)) {
+              setLocalItems(TEACHERS_COLL, json.teachers, currentEff.uid);
+              notifyCollectionSubscribers(TEACHERS_COLL, json.teachers);
+            }
+          }
+
+          // Students Sync (Bulk diff check)
+          if (Array.isArray(json.students) && json.students.length > 0) {
+            const cur = getLocalItems(STUDENTS_COLL, currentEff.uid);
+            if (JSON.stringify(cur) !== JSON.stringify(json.students)) {
+              setLocalItems(STUDENTS_COLL, json.students, currentEff.uid);
+              notifyCollectionSubscribers(STUDENTS_COLL, json.students);
+            }
+          }
+
+          // Attendance Sync (Bulk diff check)
+          if (Array.isArray(json.attendance)) {
+            const cur = getLocalItems(ATTENDANCE_COLL, currentEff.uid);
+            if (JSON.stringify(cur) !== JSON.stringify(json.attendance)) {
+              setLocalItems(ATTENDANCE_COLL, json.attendance, currentEff.uid);
+              notifyCollectionSubscribers(ATTENDANCE_COLL, json.attendance);
+            }
+          }
+
+          // Delays Sync (Bulk diff check)
+          if (Array.isArray(json.delays)) {
+            const cur = getLocalItems(MORNING_DELAYS_COLL, currentEff.uid);
+            if (JSON.stringify(cur) !== JSON.stringify(json.delays)) {
+              setLocalItems(MORNING_DELAYS_COLL, json.delays, currentEff.uid);
+              notifyCollectionSubscribers(MORNING_DELAYS_COLL, json.delays);
+            }
+          }
+
+          // Behaviors Sync (Bulk diff check)
+          if (Array.isArray(json.behaviors)) {
+            const cur = getLocalItems(BEHAVIORS_COLL, currentEff.uid);
+            if (JSON.stringify(cur) !== JSON.stringify(json.behaviors)) {
+              setLocalItems(BEHAVIORS_COLL, json.behaviors, currentEff.uid);
+              notifyCollectionSubscribers(BEHAVIORS_COLL, json.behaviors);
+            }
+          }
         }
       }
     } catch (_) {}
   };
 
   pollServer();
-  setInterval(pollServer, 3500);
+  setInterval(pollServer, 25000);
+  if (typeof window !== "undefined") {
+    window.addEventListener("focus", () => pollServer());
+  }
+}
+
+// Bootstrap entire school state to server sync store
+export async function bootstrapSchoolToServer(
+  schoolName: string,
+  grades: any[],
+  classes: any[],
+  teachers: any[],
+  students: any[]
+): Promise<void> {
+  if (typeof window === "undefined") return;
+  const schoolCode = getSchoolCode();
+  const eff = getEffectiveUidAndEmail();
+  const cleanCode = schoolCode || eff.email || eff.uid || "";
+  if (!cleanCode) return;
+
+  try {
+    await fetch("/api/sync/bootstrap", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        schoolCode: cleanCode,
+        schoolName,
+        userEmail: eff.email,
+        userId: eff.uid,
+        grades,
+        classes,
+        teachers,
+        students
+      })
+    });
+  } catch (_) {}
 }
 
 function getCollectionHub(colName: string): CollectionHub {
@@ -750,6 +950,12 @@ function notifyCollectionSubscribers(colName: string, items?: any[], fromBroadca
   }
 
   if (hub) {
+    const serialized = JSON.stringify(dataToBroadcast);
+    // If the data is strictly identical and we have already notified, don't re-trigger callbacks
+    if (hub.latestSerialized === serialized && hub.callbacks.size > 0 && hub.lastUpdated > 0) {
+      return;
+    }
+    hub.latestSerialized = serialized;
     hub.latestData = dataToBroadcast;
     hub.lastUpdated = Date.now();
     hub.callbacks.forEach(cb => {
@@ -1074,12 +1280,12 @@ export async function runComprehensiveCloudDiagnostics(customIdToTest?: string):
   // 1. Test "(default)"
   const defaultRes = await testSpecificDb("(default)");
 
-  // 2. Test project-named database "apsents1"
-  const projectNamedRes = await testSpecificDb("apsents1");
+  // 2. Test project-named database "apsent-02"
+  const projectNamedRes = await testSpecificDb("apsent-02");
 
-  // 3. Test customId if provided and not equal to (default) or apsents1
+  // 3. Test customId if provided and not equal to (default) or apsent-02
   let customRes: { ok: boolean; code?: string; message: string } | undefined;
-  if (customIdToTest && customIdToTest !== "(default)" && customIdToTest !== "apsents1") {
+  if (customIdToTest && customIdToTest !== "(default)" && customIdToTest !== "apsent-02" && customIdToTest !== "apsents1") {
     customRes = await testSpecificDb(customIdToTest);
   }
 
@@ -1090,7 +1296,7 @@ export async function runComprehensiveCloudDiagnostics(customIdToTest?: string):
   let summaryMessage = "";
 
   // Analyze active database result
-  const activeRes = activeId === "apsents1" 
+  const activeRes = activeId === "apsent-02" || activeId === "apsents1"
     ? projectNamedRes 
     : (customRes && activeId === customIdToTest ? customRes : defaultRes);
 
@@ -1099,9 +1305,9 @@ export async function runComprehensiveCloudDiagnostics(customIdToTest?: string):
     summaryMessage = `الاتصال بقاعدة البيانات النشطة (${activeId}) يعمل بنجاح 100%!`;
   } else {
     // Check if another database succeeded
-    if (projectNamedRes.ok && activeId !== "apsents1") {
-      suggestedDbId = "apsents1";
-      summaryMessage = `تم العثور على قاعدة بيانات باسم المشروع (apsents1) وهي تعمل بنجاح! يمكنك تفعيلها بنقرة واحدة.`;
+    if (projectNamedRes.ok && activeId !== "apsent-02") {
+      suggestedDbId = "apsent-02";
+      summaryMessage = `تم العثور على قاعدة بيانات باسم المشروع (apsent-02) وهي تعمل بنجاح! يمكنك تفعيلها بنقرة واحدة.`;
     } else if (defaultRes.ok && activeId !== "(default)") {
       suggestedDbId = "(default)";
       summaryMessage = `قاعدة البيانات الافتراضية (default) تعمل بنجاح! يمكنك تفعيلها بنقرة واحدة.`;
@@ -1175,7 +1381,7 @@ export async function syncAllLocalDataToFirestore(): Promise<{ count: number; su
     const code = connErr?.code || "";
     if (msg.includes("does not exist") || msg.includes("NOT_FOUND") || code === "not-found") {
       const currentId = getActiveFirestoreDatabaseId();
-      const altId = currentId === "apsents1" ? "(default)" : "apsents1";
+      const altId = currentId === "apsent-02" ? "(default)" : "apsent-02";
       try {
         const altDb = getDbForDatabaseId(altId);
         const altPing = doc(altDb, SETTINGS_COLL, "_sync_connectivity_check");
@@ -1187,7 +1393,7 @@ export async function syncAllLocalDataToFirestore(): Promise<{ count: number; su
           count: 0,
           success: false,
           code: "DATABASE_NOT_FOUND",
-          message: "قاعدة بيانات Cloud Firestore لم يتم إنشاؤها بعد في مشروع Firebase (apsents1). يرجى فتح Firebase Console ثم اختيار Firestore Database والضغط على زر Create Database."
+          message: "قاعدة بيانات Cloud Firestore لم يتم إنشاؤها بعد في مشروع Firebase (apsent-02). يرجى فتح Firebase Console ثم اختيار Firestore Database والضغط على زر Create Database."
         };
       }
     } else if (code === "permission-denied" || msg.includes("permission-denied")) {
@@ -1220,6 +1426,8 @@ export async function syncAllLocalDataToFirestore(): Promise<{ count: number; su
   let hasWriteError = false;
   let lastErrorMessage = "";
 
+  const schoolCode = getSchoolCode();
+
   try {
     for (const colName of collections) {
       const items = getLocalItems(colName, uid);
@@ -1238,6 +1446,7 @@ export async function syncAllLocalDataToFirestore(): Promise<{ count: number; su
             ...item,
             userId: item.userId || uid,
             userEmail: item.userEmail || email,
+            schoolCode: item.schoolCode || schoolCode,
             updatedAt: Date.now()
           });
         }
@@ -1591,7 +1800,11 @@ async function fetchAndFilterCollection(colName: string, force: boolean = false)
       
       const serverEndpoint = colName === ATTENDANCE_COLL ? "/api/sync/attendance" :
                              colName === BEHAVIORS_COLL ? "/api/sync/behaviors" :
-                             colName === MORNING_DELAYS_COLL ? "/api/sync/delays" : null;
+                             colName === MORNING_DELAYS_COLL ? "/api/sync/delays" :
+                             colName === GRADES_COLL ? "/api/sync/grades" :
+                             colName === CLASSES_COLL ? "/api/sync/classes" :
+                             colName === TEACHERS_COLL ? "/api/sync/teachers" :
+                             colName === STUDENTS_COLL ? "/api/sync/students" : null;
       if (serverEndpoint) {
         const sRes = await fetch(`${serverEndpoint}?${q.toString()}`);
         if (sRes.ok) {
@@ -1642,6 +1855,36 @@ async function fetchAndFilterCollection(colName: string, force: boolean = false)
       }
     }
     handleFirestoreError(err);
+
+    // Fallback: If Firestore failed or timed out, attempt to query the server endpoint
+    try {
+      const sCode = getSchoolCode();
+      const sq = new URLSearchParams();
+      if (sCode) sq.set("schoolCode", sCode);
+      if (currentEmail) sq.set("email", currentEmail);
+      if (currentUid) sq.set("uid", currentUid);
+      const fallbackEndpoint = colName === ATTENDANCE_COLL ? "/api/sync/attendance" :
+                                colName === BEHAVIORS_COLL ? "/api/sync/behaviors" :
+                                colName === MORNING_DELAYS_COLL ? "/api/sync/delays" :
+                                colName === GRADES_COLL ? "/api/sync/grades" :
+                                colName === CLASSES_COLL ? "/api/sync/classes" :
+                                colName === TEACHERS_COLL ? "/api/sync/teachers" :
+                                colName === STUDENTS_COLL ? "/api/sync/students" : null;
+      if (fallbackEndpoint) {
+        const sRes = await fetch(`${fallbackEndpoint}?${sq.toString()}`);
+        if (sRes.ok) {
+          const sJson = await sRes.json();
+          if (sJson.success && Array.isArray(sJson.records) && sJson.records.length > 0) {
+            setLocalItems(colName, sJson.records, currentUid);
+            const targetHub = getCollectionHub(colName);
+            targetHub.latestData = sJson.records;
+            targetHub.lastUpdated = Date.now();
+            return sJson.records;
+          }
+        }
+      }
+    } catch (_) {}
+
     return localList;
   }
 }
@@ -2302,6 +2545,7 @@ export async function addGrade(name: string): Promise<string> {
   const eff = getEffectiveUidAndEmail();
   const uid = eff.uid;
   const email = eff.email;
+  const currentSchoolCode = getSchoolCode();
 
   const existingGrades = await getGrades();
   const trimmedName = name.trim();
@@ -2316,11 +2560,15 @@ export async function addGrade(name: string): Promise<string> {
     name: trimmedName,
     userId: uid,
     userEmail: email,
+    schoolCode: currentSchoolCode,
     createdAt: Date.now()
   };
 
   // 1. Immediately write to local storage cache
   saveOrUpdateLocalItem(GRADES_COLL, newGradeObj);
+
+  // Real-time server sync
+  postToServerSync("/api/sync/grades", { record: newGradeObj });
 
   // 2. Persist to Firestore with explicit document ID
   const docRef = doc(db, GRADES_COLL, generatedId);
@@ -2334,6 +2582,7 @@ export async function addGradesBatch(names: string[]): Promise<{ id: string; nam
   const eff = getEffectiveUidAndEmail();
   const uid = eff.uid;
   const email = eff.email;
+  const currentSchoolCode = getSchoolCode();
 
   const localGrades = getLocalItems(GRADES_COLL).filter(g => isDocBelongingToUser(g, uid, email));
   const existingMap = new Map<string, string>();
@@ -2360,6 +2609,7 @@ export async function addGradesBatch(names: string[]): Promise<{ id: string; nam
         name: trimmed,
         userId: uid,
         userEmail: email,
+        schoolCode: currentSchoolCode,
         createdAt: Date.now()
       });
       existingMap.set(trimmed, generatedId);
@@ -2367,6 +2617,16 @@ export async function addGradesBatch(names: string[]): Promise<{ id: string; nam
   });
 
   if (toCreate.length > 0) {
+    const fullCreated = toCreate.map(item => ({
+      id: item.id,
+      name: item.name,
+      userId: uid,
+      userEmail: email,
+      schoolCode: currentSchoolCode,
+      createdAt: Date.now()
+    }));
+    postToServerSync("/api/sync/grades", { records: fullCreated });
+
     const chunkSize = 400;
     for (let i = 0; i < toCreate.length; i += chunkSize) {
       const chunk = toCreate.slice(i, i + chunkSize);
@@ -2379,6 +2639,7 @@ export async function addGradesBatch(names: string[]): Promise<{ id: string; nam
           name: item.name,
           userId: uid,
           userEmail: email,
+          schoolCode: currentSchoolCode,
           createdAt: now + i + idx
         });
       });
@@ -2420,6 +2681,15 @@ export async function deleteGrade(id: string, gradeName?: string): Promise<void>
   removeLocalItemsBy(GRADES_COLL, (g) => g.id === id || (g._docId && g._docId === id) || (resolvedGradeName && g.name?.trim() === resolvedGradeName), uid);
   removeLocalItemsBy(CLASSES_COLL, (c) => c.gradeId === id || classIdsToDelete.has(c.id) || (resolvedGradeName && (c.gradeId === resolvedGradeName || c.gradeName === resolvedGradeName)), uid);
   removeLocalItemsBy(STUDENTS_COLL, (s) => s.gradeId === id || studentIdsToDelete.has(s.id) || (resolvedGradeName && s.gradeName === resolvedGradeName) || classIdsToDelete.has(s.classId), uid);
+
+  // Real-time server sync
+  postToServerSync("/api/sync/grades", { deletedIds: [id] });
+  if (classIdsToDelete.size > 0) {
+    postToServerSync("/api/sync/classes", { deletedIds: Array.from(classIdsToDelete) });
+  }
+  if (studentIdsToDelete.size > 0) {
+    postToServerSync("/api/sync/students", { deletedIds: Array.from(studentIdsToDelete) });
+  }
 
   // 4. Cascade delete from Firestore across all matching documents
   try {
@@ -2492,6 +2762,7 @@ export async function addClass(name: string, gradeId: string): Promise<string> {
   const eff = getEffectiveUidAndEmail();
   const uid = eff.uid;
   const email = eff.email;
+  const currentSchoolCode = getSchoolCode();
 
   const trimmedName = name.trim();
   const localClasses = getLocalItems(CLASSES_COLL).filter(c => isDocBelongingToUser(c, uid, email));
@@ -2507,10 +2778,14 @@ export async function addClass(name: string, gradeId: string): Promise<string> {
     gradeId,
     userId: uid,
     userEmail: email,
+    schoolCode: currentSchoolCode,
     createdAt: Date.now()
   };
 
   saveOrUpdateLocalItem(CLASSES_COLL, newClassObj);
+
+  // Real-time server sync
+  postToServerSync("/api/sync/classes", { record: newClassObj });
 
   // Firestore write with deterministic document ID
   const docRef = doc(db, CLASSES_COLL, generatedId);
@@ -2524,6 +2799,7 @@ export async function addClassesBatch(classesList: { name: string; gradeId: stri
   const eff = getEffectiveUidAndEmail();
   const uid = eff.uid;
   const email = eff.email;
+  const currentSchoolCode = getSchoolCode();
 
   const localClasses = getLocalItems(CLASSES_COLL).filter(c => isDocBelongingToUser(c, uid, email));
   const existingKeySet = new Set<string>();
@@ -2554,6 +2830,7 @@ export async function addClassesBatch(classesList: { name: string; gradeId: stri
         gradeId: item.gradeId,
         userId: uid,
         userEmail: email,
+        schoolCode: currentSchoolCode,
         createdAt: Date.now()
       });
       existingKeySet.add(key);
@@ -2561,6 +2838,17 @@ export async function addClassesBatch(classesList: { name: string; gradeId: stri
   });
 
   if (toCreate.length > 0) {
+    const fullCreated = toCreate.map(item => ({
+      id: item.id,
+      name: item.name,
+      gradeId: item.gradeId,
+      userId: uid,
+      userEmail: email,
+      schoolCode: currentSchoolCode,
+      createdAt: Date.now()
+    }));
+    postToServerSync("/api/sync/classes", { records: fullCreated });
+
     const chunkSize = 400;
     for (let i = 0; i < toCreate.length; i += chunkSize) {
       const chunk = toCreate.slice(i, i + chunkSize);
@@ -2574,6 +2862,7 @@ export async function addClassesBatch(classesList: { name: string; gradeId: stri
           gradeId: c.gradeId,
           userId: uid,
           userEmail: email,
+          schoolCode: currentSchoolCode,
           createdAt: now + i + idx
         });
       });
@@ -2612,6 +2901,12 @@ export async function deleteClass(id: string, gradeId?: string, className?: stri
     uid
   );
   removeLocalItemsBy(STUDENTS_COLL, (s) => s.classId === id || studentIdsToDelete.has(s.id), uid);
+
+  // Real-time server sync
+  postToServerSync("/api/sync/classes", { deletedIds: [id] });
+  if (studentIdsToDelete.size > 0) {
+    postToServerSync("/api/sync/students", { deletedIds: Array.from(studentIdsToDelete) });
+  }
 
   // 4. Query & delete all matching docs from Firestore
   try {
@@ -2682,6 +2977,10 @@ export async function deleteClassesForGrade(gradeId: string, gradeName?: string)
     (resolvedGradeName && (c.gradeId === resolvedGradeName || c.gradeName === resolvedGradeName)),
     uid
   );
+
+  if (classIds.size > 0) {
+    postToServerSync("/api/sync/classes", { deletedIds: Array.from(classIds) });
+  }
 
   // 3. Firestore delete
   try {
@@ -2781,6 +3080,7 @@ export async function addTeacher(name: string): Promise<string> {
   const eff = getEffectiveUidAndEmail();
   const uid = eff.uid;
   const email = eff.email;
+  const currentSchoolCode = getSchoolCode();
   const generatedId = generateLocalId("tch");
 
   const newTeacherObj = {
@@ -2788,10 +3088,12 @@ export async function addTeacher(name: string): Promise<string> {
     name: name.trim(),
     userId: uid,
     userEmail: email,
+    schoolCode: currentSchoolCode,
     createdAt: Date.now()
   };
 
   saveOrUpdateLocalItem(TEACHERS_COLL, newTeacherObj);
+  postToServerSync("/api/sync/teachers", { record: newTeacherObj });
 
   const docRef = doc(db, TEACHERS_COLL, generatedId);
   await safeFirestoreWrite(setDoc(docRef, newTeacherObj), 200);
@@ -2804,6 +3106,7 @@ export async function addTeachersBatch(names: string[]): Promise<Teacher[]> {
   const eff = getEffectiveUidAndEmail();
   const uid = eff.uid;
   const email = eff.email;
+  const currentSchoolCode = getSchoolCode();
 
   const toCreate: Teacher[] = [];
   names.forEach(name => {
@@ -2815,11 +3118,22 @@ export async function addTeachersBatch(names: string[]): Promise<Teacher[]> {
       name: item.name,
       userId: uid,
       userEmail: email,
+      schoolCode: currentSchoolCode,
       createdAt: Date.now()
     });
   });
 
   if (toCreate.length > 0) {
+    const fullCreated = toCreate.map(item => ({
+      id: item.id,
+      name: item.name,
+      userId: uid,
+      userEmail: email,
+      schoolCode: currentSchoolCode,
+      createdAt: Date.now()
+    }));
+    postToServerSync("/api/sync/teachers", { records: fullCreated });
+
     const chunkSize = 400;
     for (let i = 0; i < toCreate.length; i += chunkSize) {
       const chunk = toCreate.slice(i, i + chunkSize);
@@ -2832,6 +3146,7 @@ export async function addTeachersBatch(names: string[]): Promise<Teacher[]> {
           name: t.name, 
           userId: uid,
           userEmail: email,
+          schoolCode: currentSchoolCode,
           createdAt: now + i + idx
         });
       });
@@ -2846,6 +3161,7 @@ export async function addTeachersBatch(names: string[]): Promise<Teacher[]> {
 export async function deleteTeacher(id: string): Promise<void> {
   const eff = getEffectiveUidAndEmail();
   removeLocalItemsBy(TEACHERS_COLL, (t) => t.id === id || t._docId === id || t._origId === id, eff.uid);
+  postToServerSync("/api/sync/teachers", { deletedIds: [id] });
   await safeFirestoreWrite(deleteDoc(doc(db, TEACHERS_COLL, id)), 200);
 }
 
@@ -2854,6 +3170,7 @@ export async function deleteTeachersBatch(ids: string[]): Promise<void> {
   const eff = getEffectiveUidAndEmail();
   const idSet = new Set(ids);
   removeLocalItemsBy(TEACHERS_COLL, (t) => idSet.has(t.id) || (t._docId && idSet.has(t._docId)) || (t._origId && idSet.has(t._origId)), eff.uid);
+  postToServerSync("/api/sync/teachers", { deletedIds: ids });
   const batch = writeBatch(db);
   ids.forEach(id => {
     batch.delete(doc(db, TEACHERS_COLL, id));
@@ -2866,6 +3183,7 @@ export async function addStudent(name: string, gradeId: string, classId: string)
   const eff = getEffectiveUidAndEmail();
   const uid = eff.uid;
   const email = eff.email;
+  const currentSchoolCode = getSchoolCode();
   const trimmedName = name.trim();
 
   // Normalize for robust duplicate checking
@@ -2904,10 +3222,12 @@ export async function addStudent(name: string, gradeId: string, classId: string)
     classId,
     userId: uid,
     userEmail: email,
+    schoolCode: currentSchoolCode,
     createdAt: Date.now()
   };
 
   saveOrUpdateLocalItem(STUDENTS_COLL, newStudentObj);
+  postToServerSync("/api/sync/students", { record: newStudentObj });
 
   const docRef = doc(db, STUDENTS_COLL, generatedId);
   await safeFirestoreWrite(setDoc(docRef, newStudentObj), 200);
@@ -2920,6 +3240,7 @@ export async function addStudentsBatch(studentsList: { name: string, gradeId: st
   const eff = getEffectiveUidAndEmail();
   const uid = eff.uid;
   const email = eff.email;
+  const currentSchoolCode = getSchoolCode();
 
   const localStudents = getLocalCollection<Student>(STUDENTS_COLL);
   const seenClassAndNames = new Set<string>();
@@ -2966,11 +3287,24 @@ export async function addStudentsBatch(studentsList: { name: string, gradeId: st
       classId: item.classId,
       userId: uid,
       userEmail: email,
+      schoolCode: currentSchoolCode,
       createdAt: Date.now()
     });
   });
 
   if (toCreate.length > 0) {
+    const fullCreated = toCreate.map(item => ({
+      id: item.id,
+      name: item.name,
+      gradeId: item.gradeId,
+      classId: item.classId,
+      userId: uid,
+      userEmail: email,
+      schoolCode: currentSchoolCode,
+      createdAt: Date.now()
+    }));
+    postToServerSync("/api/sync/students", { records: fullCreated });
+
     const chunkSize = 400;
     for (let i = 0; i < toCreate.length; i += chunkSize) {
       const chunk = toCreate.slice(i, i + chunkSize);
@@ -2985,6 +3319,7 @@ export async function addStudentsBatch(studentsList: { name: string, gradeId: st
           classId: s.classId, 
           userId: uid,
           userEmail: email,
+          schoolCode: currentSchoolCode,
           createdAt: now + i + idx
         });
       });
@@ -2999,6 +3334,7 @@ export async function addStudentsBatch(studentsList: { name: string, gradeId: st
 export async function deleteStudent(id: string): Promise<void> {
   const eff = getEffectiveUidAndEmail();
   removeLocalItemsBy(STUDENTS_COLL, (s) => s.id === id || s._docId === id || s._origId === id, eff.uid);
+  postToServerSync("/api/sync/students", { deletedIds: [id] });
   await safeFirestoreWrite(deleteDoc(doc(db, STUDENTS_COLL, id)), 200);
 }
 
@@ -3007,6 +3343,7 @@ export async function deleteStudentsBatch(ids: string[]): Promise<void> {
   const eff = getEffectiveUidAndEmail();
   const idSet = new Set(ids);
   removeLocalItemsBy(STUDENTS_COLL, (s) => idSet.has(s.id) || (s._docId && idSet.has(s._docId)) || (s._origId && idSet.has(s._origId)), eff.uid);
+  postToServerSync("/api/sync/students", { deletedIds: ids });
   const batch = writeBatch(db);
   ids.forEach(id => {
     batch.delete(doc(db, STUDENTS_COLL, id));
@@ -3062,10 +3399,52 @@ export async function getSchoolName(force: boolean = false): Promise<string> {
       const localName = localStorage.getItem(`school_name_${uid}`);
       if (localName) return localName;
     }
+    const cachedName = localStorage.getItem("school_name_cache");
+    if (cachedName) return cachedName;
   }
 
+  // 0. Instant server sync check
   try {
-    // 1. Direct document lookup for instant speed (settings_<email> or settings_<uid>)
+    const sCode = getSchoolCode();
+    const sq = new URLSearchParams();
+    if (sCode) sq.set("schoolCode", sCode);
+    if (email) sq.set("email", email);
+    if (uid) sq.set("uid", uid);
+    const sRes = await fetch(`/api/sync/school?${sq.toString()}`);
+    if (sRes.ok) {
+      const sJson = await sRes.json();
+      if (sJson.success && sJson.schoolName) {
+        if (typeof window !== "undefined") {
+          if (email) localStorage.setItem(`school_name_${email}`, sJson.schoolName);
+          if (uid) localStorage.setItem(`school_name_${uid}`, sJson.schoolName);
+          localStorage.setItem("school_name_cache", sJson.schoolName);
+          localStorage.setItem("school_name_cached", sJson.schoolName);
+        }
+        return sJson.schoolName;
+      }
+    }
+  } catch (_) {}
+
+  try {
+    // 1. Direct document lookup for instant speed (settings_<schoolCode>, settings_<email> or settings_<uid>)
+    const sCode = getSchoolCode();
+    if (sCode) {
+      try {
+        const codeDocKey = `settings_${sCode.replace(/[^a-zA-Z0-9]/g, '_')}`;
+        const codeSnap = await getDoc(doc(db, SETTINGS_COLL, codeDocKey));
+        if (codeSnap.exists() && codeSnap.data()?.schoolName) {
+          const val = codeSnap.data().schoolName;
+          if (typeof window !== "undefined") {
+            if (email) localStorage.setItem(`school_name_${email}`, val);
+            if (uid) localStorage.setItem(`school_name_${uid}`, val);
+            localStorage.setItem(`school_name_${sCode}`, val);
+            localStorage.setItem("school_name_cache", val);
+          }
+          return val;
+        }
+      } catch (_) {}
+    }
+
     if (email) {
       try {
         const emailDocKey = `settings_${email.replace(/[^a-zA-Z0-9]/g, '_')}`;
@@ -3075,6 +3454,7 @@ export async function getSchoolName(force: boolean = false): Promise<string> {
           if (typeof window !== "undefined") {
             localStorage.setItem(`school_name_${email}`, val);
             if (uid) localStorage.setItem(`school_name_${uid}`, val);
+            localStorage.setItem("school_name_cache", val);
           }
           return val;
         }
@@ -3089,6 +3469,7 @@ export async function getSchoolName(force: boolean = false): Promise<string> {
           if (typeof window !== "undefined") {
             if (email) localStorage.setItem(`school_name_${email}`, val);
             localStorage.setItem(`school_name_${uid}`, val);
+            localStorage.setItem("school_name_cache", val);
           }
           return val;
         }
@@ -3101,6 +3482,7 @@ export async function getSchoolName(force: boolean = false): Promise<string> {
           if (typeof window !== "undefined") {
             if (email) localStorage.setItem(`school_name_${email}`, val);
             localStorage.setItem(`school_name_${uid}`, val);
+            localStorage.setItem("school_name_cache", val);
           }
           return val;
         }
@@ -3119,6 +3501,7 @@ export async function getSchoolName(force: boolean = false): Promise<string> {
     if (schoolNameVal && typeof window !== "undefined") {
       if (email) localStorage.setItem(`school_name_${email}`, schoolNameVal);
       if (uid) localStorage.setItem(`school_name_${uid}`, schoolNameVal);
+      localStorage.setItem("school_name_cache", schoolNameVal);
     }
     return schoolNameVal;
   } catch (err: any) {
@@ -3126,6 +3509,7 @@ export async function getSchoolName(force: boolean = false): Promise<string> {
     if (typeof window !== "undefined") {
       if (email) return localStorage.getItem(`school_name_${email}`) || "";
       if (uid) return localStorage.getItem(`school_name_${uid}`) || "";
+      return localStorage.getItem("school_name_cache") || "";
     }
   }
   return "";
@@ -3143,15 +3527,33 @@ export async function saveSchoolName(schoolName: string): Promise<void> {
   if (typeof window !== "undefined") {
     if (email) localStorage.setItem(`school_name_${email}`, trimmed);
     if (uid) localStorage.setItem(`school_name_${uid}`, trimmed);
+    localStorage.setItem("school_name_cache", trimmed);
+    localStorage.setItem("school_name_cached", trimmed);
   }
 
   // 1. Instant local-first cache update & broadcast across tabs (0ms)
   saveOrUpdateLocalItem(SETTINGS_COLL, { schoolName: trimmed, userId: uid, userEmail: email, schoolCode, updatedAt: Date.now() }, uid);
 
-  // 2. Persist to Firestore
+  // 2. Server synchronization (0ms cross-device real-time sync)
+  postToServerSync("/api/sync/school", {
+    schoolName: trimmed,
+    schoolCode: schoolCode || email || uid,
+    userEmail: email,
+    userId: uid
+  });
+
+  // 3. Persist to Firestore
   const docKey = email ? `settings_${email.replace(/[^a-zA-Z0-9]/g, '_')}` : `settings_${uid}`;
   const docRef = doc(db, SETTINGS_COLL, docKey);
   await safeFirestoreWrite(setDoc(docRef, { schoolName: trimmed, userId: uid, userEmail: email, schoolCode, updatedAt: Date.now() }, { merge: true }), 200);
+
+  if (schoolCode) {
+    const codeDocKey = `settings_${schoolCode.replace(/[^a-zA-Z0-9]/g, '_')}`;
+    if (codeDocKey !== docKey) {
+      const codeDocRef = doc(db, SETTINGS_COLL, codeDocKey);
+      await safeFirestoreWrite(setDoc(codeDocRef, { schoolName: trimmed, userId: uid, userEmail: email, schoolCode, updatedAt: Date.now() }, { merge: true }), 200);
+    }
+  }
 
   if (uid && docKey !== `settings_${uid}`) {
     const uidDocRef = doc(db, SETTINGS_COLL, `settings_${uid}`);
@@ -3239,10 +3641,16 @@ function subscribeToCollection(colName: string, callback: (data: any[]) => void,
           }
         });
 
-        // Update local storage cache with authoritative snapshot (including empty list)
-        setLocalItems(colName, results, activeUid);
+        // Update local storage cache with authoritative snapshot
+        const serialized = JSON.stringify(results);
+        if (hub.latestSerialized === serialized && hub.callbacks.size > 0 && hub.lastUpdated > 0) {
+          return;
+        }
+        hub.latestSerialized = serialized;
         hub.latestData = results;
         hub.lastUpdated = Date.now();
+
+        setLocalItems(colName, results, activeUid);
 
         // Broadcast to all active subscribers of this collection
         hub.callbacks.forEach(cb => {
@@ -3267,7 +3675,7 @@ function subscribeToCollection(colName: string, callback: (data: any[]) => void,
         const code = error?.code || "";
         if (code === "not-found" || msg.includes("does not exist") || msg.includes("not_found")) {
           const currentId = getActiveFirestoreDatabaseId();
-          const altId = currentId === "apsents1" ? "(default)" : "apsents1";
+          const altId = currentId === "apsent-02" ? "(default)" : "apsent-02";
           console.warn(`Firestore database '${currentId}' not found in onSnapshot. Auto-switching to '${altId}'...`);
           updateActiveDb(altId);
           hub.unsub = null;
@@ -3387,17 +3795,26 @@ export function subscribeToSchoolName(callback: (schoolName: string) => void, on
   const eff = getEffectiveUidAndEmail();
   const currentUid = eff.uid;
   const currentEmail = (eff.email || "").toLowerCase().trim();
+  const sCode = getSchoolCode();
 
-  if (!currentUid && !currentEmail) {
+  if (!currentUid && !currentEmail && !sCode) {
     callback("");
     return () => {};
   }
 
   let lastKnownName = "";
   if (typeof window !== "undefined") {
-    lastKnownName = (currentEmail ? localStorage.getItem(`school_name_${currentEmail}`) : null) ||
+    const urlParams = new URLSearchParams(window.location.search);
+    const hashPart = window.location.hash.includes("?") ? window.location.hash.split("?")[1] : "";
+    const hashParams = new URLSearchParams(hashPart);
+    const urlSchool = urlParams.get("school") || hashParams.get("school") || "";
+
+    lastKnownName = urlSchool ||
+      (sCode ? localStorage.getItem(`school_name_${sCode}`) : null) ||
+      (currentEmail ? localStorage.getItem(`school_name_${currentEmail}`) : null) ||
       (currentUid ? localStorage.getItem(`school_name_${currentUid}`) : null) ||
-      localStorage.getItem("school_name_cached") || "";
+      localStorage.getItem("school_name_cached") ||
+      localStorage.getItem("school_name_cache") || "";
     if (lastKnownName) callback(lastKnownName);
   }
 

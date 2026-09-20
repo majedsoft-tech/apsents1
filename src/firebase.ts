@@ -16,13 +16,13 @@ try {
 
 // Explicit Firebase Project Configuration provided by user
 export const firebaseConfig = {
-  apiKey: "AIzaSyBfE_Uv7yi5V4MncLB-MPxlRMdiMHu2xdo",
-  authDomain: "apsents1.firebaseapp.com",
-  projectId: "apsents1",
-  storageBucket: "apsents1.firebasestorage.app",
-  messagingSenderId: "633702438157",
-  appId: "1:633702438157:web:b3067132f4ea5c073a4c44",
-  measurementId: "G-ZMDFXB1MPB"
+  apiKey: "AIzaSyBhFDgXwf3FQ61nHXPNJNz2E_3ljl5E7Fg",
+  authDomain: "apsent-02.firebaseapp.com",
+  projectId: "apsent-02",
+  storageBucket: "apsent-02.firebasestorage.app",
+  messagingSenderId: "786949363902",
+  appId: "1:786949363902:web:147991bb74461c24eaa6ef",
+  measurementId: "G-J8KHJXM2KC"
 };
 
 // Initialize Firebase App
@@ -34,12 +34,11 @@ export const app: FirebaseApp = getApps().length > 0 ? getApp() : initializeApp(
 export function getActiveFirestoreDatabaseId(): string {
   if (typeof window !== "undefined") {
     const saved = localStorage.getItem("firestore_custom_database_id");
-    // "apsents1" is the GCP project ID, not the database ID. In Firestore the default database is always "(default)".
-    // Connecting to "apsents1" as a database ID causes 5 NOT_FOUND errors.
-    if (saved && saved.trim() && saved.trim() !== "apsents1" && saved.trim() !== "(default)") {
+    // Project ID is not the database ID. In Firestore the default database is always "(default)".
+    if (saved && saved.trim() && saved.trim() !== "apsent-02" && saved.trim() !== "apsents1" && saved.trim() !== "(default)") {
       return saved.trim();
     }
-    if (saved === "apsents1") {
+    if (saved === "apsents1" || saved === "apsent-02") {
       try {
         localStorage.removeItem("firestore_custom_database_id");
       } catch (_) {}

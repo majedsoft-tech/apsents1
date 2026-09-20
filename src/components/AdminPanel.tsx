@@ -1055,6 +1055,32 @@ export default function AdminPanel({
       const safeAttendance = Array.isArray(attendance) ? attendance : [];
       const safeBehaviors = Array.isArray(behaviors) ? behaviors : [];
 
+      // Fast in-memory lookup maps to eliminate O(N^2) loops and localStorage parsing
+      const studentMap = new Map<string, { name: string; classId?: string }>();
+      if (Array.isArray(students)) {
+        students.forEach(s => {
+          if (s && s.id) {
+            const entry = { name: s.name || "", classId: s.classId };
+            studentMap.set(s.id, entry);
+            studentMap.set(s.id.toLowerCase(), entry);
+          }
+        });
+      }
+
+      const classMap = new Map<string, string>();
+      if (Array.isArray(classes)) {
+        classes.forEach(c => {
+          if (c && c.id) classMap.set(c.id, c.name || "");
+        });
+      }
+
+      const gradeMap = new Map<string, string>();
+      if (Array.isArray(grades)) {
+        grades.forEach(g => {
+          if (g && g.id) gradeMap.set(g.id, g.name || "");
+        });
+      }
+
       // Absences analysis
       let totalAbsCount = 0;
       const studentAbsMap: Record<string, number> = {};
@@ -1072,10 +1098,10 @@ export default function AdminPanel({
 
       const absenteeRankings = Object.entries(studentAbsMap)
         .map(([studentId, count]) => {
-          const student = Array.isArray(students) ? students.find(s => s && s.id === studentId) : undefined;
-          const studentClass = (Array.isArray(classes) ? classes.find(c => c && c.id === student?.classId)?.name : "") || "بدون فصل";
+          const studentEntry = studentMap.get(studentId) || studentMap.get(studentId.toLowerCase());
+          const studentClass = (studentEntry?.classId ? classMap.get(studentEntry.classId) : "") || "بدون فصل";
           return {
-            name: student ? student.name : "طالب غير معروف",
+            name: studentEntry?.name || "طالب غير معروف",
             count,
             className: studentClass
           };
@@ -1230,11 +1256,11 @@ export default function AdminPanel({
 
         const newlyAdded = incomingIds.filter(id => !seenBehaviorIdsRef.current.has(id));
         if (newlyAdded.length > 0) {
-          setNewBehaviorIds(newlyAdded);
-          setHasNewBehavior(true);
+          setNewBehaviorIds(prev => (prev.length === newlyAdded.length && prev.every((v, i) => v === newlyAdded[i])) ? prev : newlyAdded);
+          setHasNewBehavior(prev => prev ? prev : true);
         } else {
-          setNewBehaviorIds([]);
-          setHasNewBehavior(false);
+          setNewBehaviorIds(prev => prev.length === 0 ? prev : []);
+          setHasNewBehavior(prev => !prev ? prev : false);
         }
       }
 
@@ -1452,39 +1478,10 @@ export default function AdminPanel({
             return recordObj.studentNames[stId];
           }
 
-          // 2. Lookup in current students state
-          const student = students.find(s => s && (s.id === stId || s.name === stId || s.id?.toLowerCase() === stId.toLowerCase()));
-          if (student && student.name && student.name.trim()) {
-            return student.name.trim();
-          }
-
-          // 3. Lookup in local cached students
-          try {
-            const cached = getLocalCollection<Student>("students");
-            const foundCached = cached.find(s => s && (s.id === stId || s.name === stId || s.id?.toLowerCase() === stId.toLowerCase()));
-            if (foundCached && foundCached.name && foundCached.name.trim()) {
-              return foundCached.name.trim();
-            }
-          } catch (_) {}
-
-          // 4. Scan all localStorage items for any student object matching this ID
-          if (stId.startsWith("stu_") || stId.startsWith("temp_") || /^[a-zA-Z0-9_-]{12,}$/.test(stId)) {
-            try {
-              for (let i = 0; i < localStorage.length; i++) {
-                const key = localStorage.key(i);
-                if (key && (key.includes("student") || key.includes("local_db") || key.includes("cached"))) {
-                  const raw = localStorage.getItem(key);
-                  if (raw && raw.includes(stId)) {
-                    const parsed = JSON.parse(raw);
-                    if (Array.isArray(parsed)) {
-                      const matched = parsed.find((item: any) => item?.id === stId);
-                      if (matched?.name) return matched.name;
-                    }
-                  }
-                }
-              }
-            } catch (_) {}
-            return "طالب مسجل";
+          // 2. Lookup in memoized studentMap O(1)
+          const st = studentMap.get(stId) || studentMap.get(stId.toLowerCase());
+          if (st && st.name && st.name.trim()) {
+            return st.name.trim();
           }
 
           return stId;
@@ -1776,13 +1773,24 @@ export default function AdminPanel({
       sortEntriesList(g2Entries);
       sortEntriesList(g3Entries);
 
-      setTodayStats({
-        absentCount,
-        behaviorCount,
-        grade1Entries: g1Entries,
-        grade2Entries: g2Entries,
-        grade3Entries: g3Entries,
-        entriesByGrade
+      setTodayStats(prev => {
+        if (
+          prev.absentCount === absentCount &&
+          prev.behaviorCount === behaviorCount &&
+          prev.grade1Entries.length === g1Entries.length &&
+          prev.grade2Entries.length === g2Entries.length &&
+          prev.grade3Entries.length === g3Entries.length
+        ) {
+          return prev;
+        }
+        return {
+          absentCount,
+          behaviorCount,
+          grade1Entries: g1Entries,
+          grade2Entries: g2Entries,
+          grade3Entries: g3Entries,
+          entriesByGrade
+        };
       });
 
       if (onTodayStatsChange) {
@@ -2021,20 +2029,24 @@ export default function AdminPanel({
   const cachedBehaviorsRef = useRef<BehaviorRecord[]>([]);
   const cachedDelaysRef = useRef<MorningDelayRecord[]>([]);
   const behaviorsReceivedRef = useRef<boolean>(false);
+  const computeDebounceTimerRef = useRef<any>(null);
 
   useEffect(() => {
     if (isAuthenticated || isReadOnly) {
       setStatsLoading(true);
       
       const runCompute = () => {
-        computeStatistics(
-          cachedAttendanceRef.current, 
-          cachedBehaviorsRef.current, 
-          cachedDelaysRef.current, 
-          behaviorsReceivedRef.current,
-          selectedAttendanceDate
-        );
-        setStatsLoading(false);
+        if (computeDebounceTimerRef.current) clearTimeout(computeDebounceTimerRef.current);
+        computeDebounceTimerRef.current = setTimeout(() => {
+          computeStatistics(
+            cachedAttendanceRef.current, 
+            cachedBehaviorsRef.current, 
+            cachedDelaysRef.current, 
+            behaviorsReceivedRef.current,
+            selectedAttendanceDate
+          );
+          setStatsLoading(false);
+        }, 60);
       };
 
       // Proactively load authoritative statistics on mount/refresh
@@ -2078,6 +2090,7 @@ export default function AdminPanel({
       window.addEventListener("school_refresh_stats", handleForceRefresh);
 
       return () => {
+        if (computeDebounceTimerRef.current) clearTimeout(computeDebounceTimerRef.current);
         unsubAttendance();
         unsubBehaviors();
         unsubDelays();
@@ -2089,14 +2102,20 @@ export default function AdminPanel({
   // Re-compute stats when students, classes, grades, activeSubTab, or selectedAttendanceDate change
   useEffect(() => {
     if (isAuthenticated || isReadOnly) {
-      computeStatistics(
-        cachedAttendanceRef.current, 
-        cachedBehaviorsRef.current, 
-        cachedDelaysRef.current, 
-        behaviorsReceivedRef.current,
-        selectedAttendanceDate
-      );
+      if (computeDebounceTimerRef.current) clearTimeout(computeDebounceTimerRef.current);
+      computeDebounceTimerRef.current = setTimeout(() => {
+        computeStatistics(
+          cachedAttendanceRef.current, 
+          cachedBehaviorsRef.current, 
+          cachedDelaysRef.current, 
+          behaviorsReceivedRef.current,
+          selectedAttendanceDate
+        );
+      }, 60);
     }
+    return () => {
+      if (computeDebounceTimerRef.current) clearTimeout(computeDebounceTimerRef.current);
+    };
   }, [students, classes, grades, activeSubTab, selectedAttendanceDate]);
 
   // --- CRUD HANDLERS (Grades & Classes) ---

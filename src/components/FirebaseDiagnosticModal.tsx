@@ -99,7 +99,7 @@ service cloud.firestore {
             </div>
             <div>
               <h3 className="font-bold text-slate-800 text-lg">تشخيص وخصائص قاعدة البيانات السحابية</h3>
-              <p className="text-xs text-slate-500">مشروع Firebase الحالي: <span className="font-mono font-bold text-blue-700">apsents1</span></p>
+              <p className="text-xs text-slate-500">مشروع Firebase الحالي: <span className="font-mono font-bold text-blue-700">apsent-02</span></p>
             </div>
           </div>
           <button
@@ -188,7 +188,7 @@ service cloud.firestore {
                 </span>
               </div>
               <p className="text-xs text-slate-500 leading-relaxed">
-                عند إنشاء قاعدة بيانات جديدة، يعطيها Firebase افتراضياً الاسم <code className="bg-slate-200 px-1 rounded font-bold">(default)</code>. إذا كنت قد سميتها باسم مشروعك <code className="bg-slate-200 px-1 rounded font-bold">apsents1</code> أو أي اسم آخر، اختره من هنا للربط المباشر:
+                عند إنشاء قاعدة بيانات جديدة، يعطيها Firebase افتراضياً الاسم <code className="bg-slate-200 px-1 rounded font-bold">(default)</code>. إذا كنت قد سميتها باسم مشروعك <code className="bg-slate-200 px-1 rounded font-bold">apsent-02</code> أو أي اسم آخر، اختره من هنا للربط المباشر:
               </p>
               
               <div className="flex flex-wrap gap-2 pt-1">
@@ -205,14 +205,14 @@ service cloud.firestore {
                 </button>
 
                 <button
-                  onClick={() => handleApplyNewDbId("apsents1")}
+                  onClick={() => handleApplyNewDbId("apsent-02")}
                   className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors flex items-center gap-1.5 ${
-                    activeId === "apsents1"
+                    activeId === "apsent-02"
                       ? "bg-blue-600 text-white border-blue-600"
                       : "bg-white text-slate-700 border-slate-200 hover:bg-slate-100"
                   }`}
                 >
-                  استخدام apsents1
+                  استخدام apsent-02
                   {diagnostics?.projectNamedDbResult?.ok && <Check className="w-3.5 h-3.5 text-emerald-400" />}
                 </button>
 
@@ -243,7 +243,7 @@ service cloud.firestore {
                   2. قواعد الأمان (Firestore Rules):
                 </span>
                 <a
-                  href="https://console.firebase.google.com/project/apsents1/firestore/rules"
+                  href="https://console.firebase.google.com/project/apsent-02/firestore/rules"
                   target="_blank"
                   rel="noreferrer"
                   className="text-xs text-blue-600 hover:text-blue-700 font-bold flex items-center gap-1 hover:underline"
@@ -291,7 +291,7 @@ service cloud.firestore {
                   4. النطاقات المصرح بها (Authorized Domains):
                 </span>
                 <a
-                  href="https://console.firebase.google.com/project/apsents1/authentication/settings"
+                  href="https://console.firebase.google.com/project/apsent-02/authentication/settings"
                   target="_blank"
                   rel="noreferrer"
                   className="text-xs text-blue-600 hover:text-blue-700 font-bold flex items-center gap-1 hover:underline"
@@ -322,11 +322,11 @@ service cloud.firestore {
           {/* Quick Firebase Console Link Banner */}
           <div className="p-4 bg-gradient-to-r from-blue-600 to-indigo-700 rounded-xl text-white flex items-center justify-between gap-3 shadow-md">
             <div>
-              <h5 className="font-bold text-sm">فتح كونسول Firebase مباشرة لمشروع apsents1</h5>
+              <h5 className="font-bold text-sm">فتح كونسول Firebase مباشرة لمشروع apsent-02</h5>
               <p className="text-xs text-blue-100 mt-0.5">يمكنك الاطلاع على قاعدة البيانات أو إنشائها وتعديل الخصائص في ثوانٍ.</p>
             </div>
             <a
-              href="https://console.firebase.google.com/project/apsents1/firestore"
+              href="https://console.firebase.google.com/project/apsent-02/firestore"
               target="_blank"
               rel="noreferrer"
               className="px-4 py-2 bg-white text-blue-700 hover:bg-blue-50 rounded-xl text-xs font-bold transition-colors shrink-0 flex items-center gap-1.5 shadow-sm"

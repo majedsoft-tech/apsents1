@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { 
   getGrades, 
   getClasses, 
@@ -31,7 +31,8 @@ import {
   testCloudFirestoreConnection,
   getSchoolCode,
   setSchoolCode,
-  initServerSyncEngine
+  initServerSyncEngine,
+  bootstrapSchoolToServer
 } from "./dbService";
 import { Grade, Class, Teacher, Student } from "./types";
 import TeacherPortal from "./components/TeacherPortal";
@@ -136,15 +137,82 @@ function getInitialAdminTab(): "stats" | "grades" | "teachers" | "students" {
   return "stats";
 }
 
+function getInitialCachedUser(): any {
+  if (typeof window === "undefined") return null;
+  try {
+    if (auth?.currentUser) return auth.currentUser;
+    const raw = localStorage.getItem("last_active_school_owner");
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && (parsed.uid || parsed.email)) {
+        return {
+          uid: parsed.uid || "",
+          email: parsed.email || "",
+          displayName: parsed.displayName || "المعلم / المشرف",
+          isGuest: false
+        };
+      }
+    }
+  } catch (_) {}
+  // Default instant offline/active user so the application is immediately responsive and NEVER hangs
+  return {
+    uid: "guest_school_admin",
+    email: "admin@school.local",
+    displayName: "مدير النظام",
+    isGuest: true
+  };
+}
+
+function getInitialSchoolName(): string {
+  if (typeof window === "undefined") return "";
+  try {
+    const searchParams = new URLSearchParams(window.location.search);
+    const hashIndex = window.location.hash.indexOf("?");
+    const hashParams = hashIndex !== -1 ? new URLSearchParams(window.location.hash.substring(hashIndex)) : null;
+    const schoolParam = searchParams.get("school") || searchParams.get("schoolName") || hashParams?.get("school") || hashParams?.get("schoolName");
+    if (schoolParam) return decodeURIComponent(schoolParam);
+    const cached = localStorage.getItem("school_name_cached") || localStorage.getItem("school_name_cache");
+    if (cached) return cached;
+    const ownerRaw = localStorage.getItem("last_active_school_owner");
+    if (ownerRaw) {
+      const parsed = JSON.parse(ownerRaw);
+      if (parsed?.email) {
+        const byEmail = localStorage.getItem(`school_name_${parsed.email.toLowerCase().trim()}`);
+        if (byEmail) return byEmail;
+      }
+    }
+  } catch (_) {}
+  return "";
+}
+
 export default function App() {
-  // Authentication States
-  const [currentUser, setCurrentUser] = useState<any>(null);
-  const [authChecking, setAuthChecking] = useState<boolean>(true);
+  // Authentication States - Hydrate synchronously from cache for 0ms instant startup
+  const [currentUser, setCurrentUser] = useState<any>(() => {
+    const cached = getInitialCachedUser();
+    if (cached) {
+      try {
+        setActiveUser(cached);
+      } catch (_) {}
+    }
+    return cached;
+  });
+  const [authChecking, setAuthChecking] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    const initialMode = getInitialMode();
+    // Portal links and cached users never need to wait for auth check
+    if (initialMode === "teacher" || initialMode === "morning-delay" || initialMode === "stats-only") {
+      return false;
+    }
+    if (getInitialCachedUser()) {
+      return false;
+    }
+    return true;
+  });
   const [loginError, setLoginError] = useState<string | null>(null);
   const [domainCopied, setDomainCopied] = useState<boolean>(false);
 
-  // School Name States
-  const [schoolName, setSchoolName] = useState<string>("");
+  // School Name States - Hydrate instantly
+  const [schoolName, setSchoolName] = useState<string>(() => getInitialSchoolName());
   const [isSavingSchoolName, setIsSavingSchoolName] = useState<boolean>(false);
 
   // Cloud Sync & Cross-Domain Link States
@@ -183,12 +251,24 @@ export default function App() {
   const [isEditingSidebarSchool, setIsEditingSidebarSchool] = useState<boolean>(false);
   const [sidebarSchoolInput, setSidebarSchoolInput] = useState<string>("");
 
-  // Database States
-  const [grades, setGrades] = useState<Grade[]>([]);
-  const [classes, setClasses] = useState<Class[]>([]);
-  const [teachers, setTeachers] = useState<Teacher[]>([]);
-  const [students, setStudents] = useState<Student[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
+  // Database States - Hydrate synchronously from cache for 0ms instant display
+  const [grades, setGrades] = useState<Grade[]>(() => {
+    if (typeof window === "undefined") return [];
+    try { return getLocalCollection<Grade>("grades") || []; } catch (_) { return []; }
+  });
+  const [classes, setClasses] = useState<Class[]>(() => {
+    if (typeof window === "undefined") return [];
+    try { return getLocalCollection<Class>("classes") || []; } catch (_) { return []; }
+  });
+  const [teachers, setTeachers] = useState<Teacher[]>(() => {
+    if (typeof window === "undefined") return [];
+    try { return getLocalCollection<Teacher>("teachers") || []; } catch (_) { return []; }
+  });
+  const [students, setStudents] = useState<Student[]>(() => {
+    if (typeof window === "undefined") return [];
+    try { return getLocalCollection<Student>("students") || []; } catch (_) { return []; }
+  });
+  const [loading, setLoading] = useState<boolean>(false);
 
   // Responsive Navigation States
   const [appMode, setAppMode] = useState<"teacher" | "admin" | "stats-only" | "super-admin" | "morning-delay">(getInitialMode());
@@ -257,6 +337,15 @@ export default function App() {
   const [isRefreshingData, setIsRefreshingData] = useState<boolean>(false);
   const [todayCounts, setTodayCounts] = useState<{ absentCount: number; behaviorCount: number }>({ absentCount: 0, behaviorCount: 0 });
 
+  const handleTodayStatsChange = useCallback((newStats: { absentCount: number; behaviorCount: number }) => {
+    setTodayCounts(prev => {
+      if (prev.absentCount === newStats.absentCount && prev.behaviorCount === newStats.behaviorCount) {
+        return prev;
+      }
+      return newStats;
+    });
+  }, []);
+
   // Desktop sidebar control states - Sidebar is permanently pinned and open
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true);
 
@@ -276,6 +365,11 @@ export default function App() {
     const interval = setInterval(updateTime, 60000);
     return () => clearInterval(interval);
   }, []);
+
+  const appModeRef = React.useRef(appMode);
+  useEffect(() => {
+    appModeRef.current = appMode;
+  }, [appMode]);
 
   // Setup real-time subscribers for grades, classes, teachers, and students to keep data synced instantly
   useEffect(() => {
@@ -320,81 +414,109 @@ export default function App() {
       }).catch(() => {});
     }
 
-    const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
-      const isPortalPage = appMode === "teacher" || appMode === "morning-delay" || appMode === "stats-only";
-      
-      if (user) {
-        // If accessed via an independent school link on a portal page, preserve the linked school identity
-        if (effectiveCode && isPortalPage) {
-          console.log("Preserving independent link school context:", effectiveCode);
-          setAuthChecking(false);
-          return;
-        }
+    // Safety timeout: Guarantee authChecking and loading NEVER block the user longer than 600ms
+    const authTimeout = setTimeout(() => {
+      setAuthChecking(false);
+      setLoading(false);
+    }, 600);
 
-        setCurrentUser(user);
-        setActiveUser(user);
+    const unsubscribeAuth = onAuthStateChanged(
+      auth,
+      async (user) => {
+        clearTimeout(authTimeout);
+        const currentMode = appModeRef.current;
+        const isPortalPage = currentMode === "teacher" || currentMode === "morning-delay" || currentMode === "stats-only";
+        
         try {
-          localStorage.setItem("last_active_school_owner", JSON.stringify({ uid: user.uid, email: user.email || "" }));
-          if (user.email) {
-            localStorage.setItem("own_school_admin_email", user.email);
-            setSchoolCode(user.email);
-          }
-          if (user.uid) {
-            localStorage.setItem("own_school_admin_id", user.uid);
-          }
-        } catch (_) {}
-        // Proactively refresh authoritative cloud data for this user on second device or reload
-        handleRefreshData().catch(() => {});
-      } else {
-        // If accessed via direct link with code/owner/email params, initialize proxy user for direct viewing
-        if (effectiveCode) {
-          const directUser = {
-            uid: ownerParam || effectiveCode,
-            email: emailParam || (effectiveCode.includes("@") ? effectiveCode : `owner_${effectiveCode}@school.com`),
-            displayName: "المعلم / المشرف",
-            isGuest: false
-          };
-          setActiveUser(directUser);
-          setCurrentUser(directUser);
-          try {
-            localStorage.setItem("last_active_school_owner", JSON.stringify({ uid: directUser.uid, email: directUser.email }));
-          } catch (_) {}
-        } else {
-          let restoredUser: any = null;
-          try {
-            const raw = localStorage.getItem("last_active_school_owner");
-            if (raw) {
-              const parsed = JSON.parse(raw);
-              if (parsed && (parsed.uid || parsed.email)) {
-                restoredUser = {
-                  uid: parsed.uid || "",
-                  email: parsed.email || "",
-                  displayName: "المعلم / المشرف",
-                  isGuest: false
+          if (user) {
+            // If accessed via an independent school link on a portal page, preserve the linked school identity
+            if (effectiveCode && isPortalPage) {
+              console.log("Preserving independent link school context:", effectiveCode);
+              setAuthChecking(false);
+              return;
+            }
+
+            setCurrentUser(user);
+            setActiveUser(user);
+            try {
+              localStorage.setItem("last_active_school_owner", JSON.stringify({ uid: user.uid, email: user.email || "" }));
+              if (user.email) {
+                localStorage.setItem("own_school_admin_email", user.email);
+                setSchoolCode(user.email);
+              }
+              if (user.uid) {
+                localStorage.setItem("own_school_admin_id", user.uid);
+              }
+            } catch (_) {}
+            // Proactively refresh authoritative cloud data for this user on second device or reload
+            handleRefreshData().catch(() => {});
+          } else {
+            // If accessed via direct link with code/owner/email params, initialize proxy user for direct viewing
+            if (effectiveCode) {
+              const directUser = {
+                uid: ownerParam || effectiveCode,
+                email: emailParam || (effectiveCode.includes("@") ? effectiveCode : `owner_${effectiveCode}@school.com`),
+                displayName: "المعلم / المشرف",
+                isGuest: false
+              };
+              setActiveUser(directUser);
+              setCurrentUser(directUser);
+              try {
+                localStorage.setItem("last_active_school_owner", JSON.stringify({ uid: directUser.uid, email: directUser.email }));
+              } catch (_) {}
+            } else {
+              let restoredUser: any = null;
+              try {
+                const raw = localStorage.getItem("last_active_school_owner");
+                if (raw) {
+                  const parsed = JSON.parse(raw);
+                  if (parsed && (parsed.uid || parsed.email)) {
+                    restoredUser = {
+                      uid: parsed.uid || "",
+                      email: parsed.email || "",
+                      displayName: "المعلم / المشرف",
+                      isGuest: false
+                    };
+                  }
+                }
+              } catch (_) {}
+
+              if (restoredUser) {
+                setActiveUser(restoredUser);
+                setCurrentUser(restoredUser);
+              } else {
+                // Keep local cached user and offline school data so the UI is responsive immediately
+                const fallback = {
+                  uid: "guest_school_admin",
+                  email: "admin@school.local",
+                  displayName: "مدير النظام",
+                  isGuest: true
                 };
+                setActiveUser(fallback);
+                setCurrentUser(fallback);
               }
             }
-          } catch (_) {}
-
-          if (restoredUser) {
-            setActiveUser(restoredUser);
-            setCurrentUser(restoredUser);
-          } else {
-            setCurrentUser(null);
-            setActiveUser(null);
-            setGrades([]);
-            setClasses([]);
-            setTeachers([]);
-            setStudents([]);
-            setSchoolName("");
-            setTodayCounts({ absentCount: 0, behaviorCount: 0 });
           }
+        } catch (authErr) {
+          console.warn("Auth processing warning:", authErr);
+        } finally {
+          setAuthChecking(false);
+          setLoading(false);
         }
+      },
+      (error) => {
+        console.warn("onAuthStateChanged error:", error);
+        clearTimeout(authTimeout);
+        setAuthChecking(false);
+        setLoading(false);
       }
-      setAuthChecking(false);
-    });
-    return () => unsubscribeAuth();
-  }, [appMode]);
+    );
+
+    return () => {
+      clearTimeout(authTimeout);
+      unsubscribeAuth();
+    };
+  }, []);
 
   // Synchronize registered user profile in Firestore
   useEffect(() => {
@@ -472,7 +594,16 @@ export default function App() {
       (userUid ? localStorage.getItem(`school_name_${userUid}`) : null);
     setSchoolName(cachedName || "");
 
-    setLoading(true);
+    // Only activate loading if there is zero cached data
+    if (localGrades.length === 0 && localClasses.length === 0 && !cachedName) {
+      setLoading(true);
+    } else {
+      setLoading(false);
+    }
+
+    const safetyLoadTimer = setTimeout(() => {
+      setLoading(false);
+    }, 400);
 
     let unsubSchool: (() => void) | null = null;
     let unsubGrades: (() => void) | null = null;
@@ -582,9 +713,14 @@ export default function App() {
 
         const behaviorCount = latestBehaviors.filter((b: any) => b && b.date === todayStr).length;
 
-        setTodayCounts({
-          absentCount: absentStudentIds.size,
-          behaviorCount
+        setTodayCounts(prev => {
+          if (prev.absentCount === absentStudentIds.size && prev.behaviorCount === behaviorCount) {
+            return prev;
+          }
+          return {
+            absentCount: absentStudentIds.size,
+            behaviorCount
+          };
         });
       };
 
@@ -606,7 +742,28 @@ export default function App() {
       // Turn off loading spinner quickly
       setTimeout(() => setLoading(false), 250);
 
+      // Auto-bootstrap local school data to server sync store
+      setTimeout(async () => {
+        try {
+          const currentGrades = await getGrades();
+          const currentClasses = await getClasses();
+          const currentTeachers = await getTeachers();
+          const currentStudents = await getStudents();
+          const currentSchoolName = await getSchoolName();
+          if (currentGrades.length > 0 || currentClasses.length > 0 || currentTeachers.length > 0 || currentStudents.length > 0 || currentSchoolName) {
+            bootstrapSchoolToServer(
+              currentSchoolName,
+              currentGrades,
+              currentClasses,
+              currentTeachers,
+              currentStudents
+            );
+          }
+        } catch (_) {}
+      }, 1500);
+
       return () => {
+        clearTimeout(safetyLoadTimer);
         if (unsubSchool) (unsubSchool as () => void)();
         if (unsubGrades) (unsubGrades as () => void)();
         if (unsubClasses) (unsubClasses as () => void)();
@@ -675,7 +832,18 @@ export default function App() {
       const sortedTeachers = uniqueTeachers.sort((a, b) => a.name.localeCompare(b.name, "ar"));
       setTeachers(sortedTeachers);
 
-      setStudents(deduplicateStudents(s));
+      const finalStudents = deduplicateStudents(s);
+      setStudents(finalStudents);
+
+      // Synchronize all latest data to server sync store
+      bootstrapSchoolToServer(
+        sn || schoolName,
+        sortedGrades,
+        sortedClasses,
+        sortedTeachers,
+        finalStudents
+      );
+
       try {
         window.dispatchEvent(new CustomEvent("school_refresh_stats"));
       } catch (_) {}
@@ -1106,7 +1274,11 @@ export default function App() {
     }
   };
 
-  if (authChecking || loading) {
+  // Only show blocking loader if truly verifying auth for an unauthenticated user on admin routes
+  const isPortalMode = isDirectTeacherLink || isDirectMorningDelayLink || appMode === "teacher" || appMode === "morning-delay" || appMode === "stats-only";
+  const shouldShowLoader = !isPortalMode && !currentUser && authChecking;
+
+  if (shouldShowLoader) {
     return (
       <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-center text-slate-100" dir="rtl">
         <div className="max-w-md w-full bg-slate-900/80 border border-slate-800 rounded-3xl p-8 space-y-5 shadow-2xl relative overflow-hidden animate-fadeIn backdrop-blur-md">
@@ -1141,13 +1313,36 @@ export default function App() {
             
             <div className="mt-4 p-3.5 bg-slate-950/70 border border-slate-800/80 rounded-2xl w-full text-slate-300">
               <p className="text-xs text-slate-400 font-medium leading-relaxed">
-                {authChecking 
-                  ? "جاري التحقق من حالة تسجيل الدخول..." 
-                  : schoolName 
-                    ? `أهلاً بك مجدداً! جاري تحميل سجلات ${schoolName} والبيانات الحية...`
-                    : "أهلاً بك! جاري تهيئة حسابك وحفظ اسم مدرستك وتحميل البيانات..."
+                {schoolName 
+                  ? `أهلاً بك مجدداً! جاري تهيئة بوابة ${schoolName}...`
+                  : "جاري التحقق من حالة تسجيل الدخول وتحميل البيانات..."
                 }
               </p>
+            </div>
+
+            {/* Emergency Bypass Controls: Guaranteed instant exit if network or auth takes longer */}
+            <div className="mt-4 pt-3 border-t border-slate-800/80 w-full flex flex-col gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthChecking(false);
+                  setLoading(false);
+                }}
+                className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-bold transition-all shadow-md active:scale-95"
+              >
+                تخطي الانتظار والدخول المباشر
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthChecking(false);
+                  setLoading(false);
+                  setCurrentUser(null);
+                }}
+                className="w-full py-2 px-3 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 text-xs font-medium transition-all"
+              >
+                تسجيل الدخول بحساب Google
+              </button>
             </div>
           </div>
         </div>
@@ -1249,6 +1444,51 @@ export default function App() {
             </svg>
             <span>تسجيل الدخول باستخدام حساب Google</span>
           </button>
+
+          {/* Quick Direct Entry & Portal Bypasses - Ensures zero UI lockup even if Google sign-in is blocked */}
+          <div className="pt-3 border-t border-slate-800/80 space-y-2">
+            <button
+              type="button"
+              onClick={() => {
+                const guestUser = {
+                  uid: "guest_admin_" + Date.now(),
+                  email: "admin@school.local",
+                  displayName: "مدير النظام (دخول مباشر)",
+                  isGuest: true
+                };
+                setActiveUser(guestUser);
+                setCurrentUser(guestUser);
+                setAppMode("admin");
+                setAdminTab("stats");
+              }}
+              className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-bold transition-all shadow-md active:scale-95 cursor-pointer"
+            >
+              🚀 الدخول المباشر إلى لوحة التحكم (بدون تسجيل)
+            </button>
+
+            <div className="grid grid-cols-2 gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setAppMode("teacher");
+                  setIsDirectTeacherLink(true);
+                }}
+                className="py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-[11px] font-bold transition-all cursor-pointer"
+              >
+                رابط المعلمين
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAppMode("morning-delay");
+                  setIsDirectMorningDelayLink(true);
+                }}
+                className="py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-[11px] font-bold transition-all cursor-pointer"
+              >
+                رابط التأخر الصباحي
+              </button>
+            </div>
+          </div>
 
           <p className="text-[10px] text-slate-500 font-medium">سيتم ربط بياناتك وهيكلك المدرسي تلقائياً بحسابك الموثق</p>
         </div>
@@ -1889,7 +2129,7 @@ export default function App() {
               activeSubTab={appMode === "stats-only" ? "stats" : adminTab}
               setActiveSubTab={setAdminTab}
               isReadOnly={false}
-              onTodayStatsChange={setTodayCounts}
+              onTodayStatsChange={handleTodayStatsChange}
               schoolName={schoolName}
               onSchoolNameChange={handleSchoolNameChange}
               isSavingSchoolName={isSavingSchoolName}
@@ -2208,7 +2448,7 @@ export default function App() {
 
             <div className="text-xs text-slate-700 font-medium space-y-3 leading-relaxed">
               <p className="font-bold text-slate-800">
-                مشروع Firebase تم ربطه بنجاح (<span className="text-indigo-600 font-mono font-black" dir="ltr">apsents1</span>)، ولكن قاعدة بيانات Cloud Firestore لم يتم إنشاؤها بعد داخل حسابك في Firebase.
+                مشروع Firebase تم ربطه بنجاح (<span className="text-indigo-600 font-mono font-black" dir="ltr">apsent-02</span>)، ولكن قاعدة بيانات Cloud Firestore لم يتم إنشاؤها بعد داخل حسابك في Firebase.
               </p>
 
               <div className="bg-amber-50/70 border border-amber-200 rounded-2xl p-3.5 space-y-2">
@@ -2219,13 +2459,13 @@ export default function App() {
                   <li>افتح رابط Firestore في كونسول Google Firebase:</li>
                   <div className="pt-1 pb-1">
                     <a
-                      href="https://console.firebase.google.com/project/apsents1/firestore"
+                      href="https://console.firebase.google.com/project/apsent-02/firestore"
                       target="_blank"
                       rel="noreferrer"
                       className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black shadow-xs"
                     >
                       <ExternalLink className="w-3.5 h-3.5" />
-                      <span>فتح Firebase Console لمشروع apsents1</span>
+                      <span>فتح Firebase Console لمشروع apsent-02</span>
                     </a>
                   </div>
                   <li>اضغط على زر <strong>"Create Database"</strong> (إنشاء قاعدة بيانات).</li>
